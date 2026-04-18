@@ -99,12 +99,21 @@ label span {
   margin-bottom: 8px;
 }
 
-input {
+input,
+textarea,
+select {
   width: 100%;
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 12px 14px;
   font-size: 15px;
+  font-family: inherit;
+  background: white;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 120px;
 }
 
 button,
@@ -310,6 +319,10 @@ button,
   flex: 1 1 320px;
 }
 
+.toolbar-category {
+  flex: 0 0 220px;
+}
+
 .toolbar-row {
   justify-content: space-between;
 }
@@ -329,6 +342,16 @@ button,
 
 .compact-selection-row {
   justify-content: flex-end;
+}
+
+.compact-action-button {
+  padding: 8px 12px;
+  font-size: 13px;
+  border-radius: 10px;
+}
+
+.key-action-row {
+  gap: 8px;
 }
 
 .pagination-row {

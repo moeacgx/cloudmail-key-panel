@@ -107,12 +107,16 @@ def test_admin_can_create_mapping_and_public_lookup_shows_recent_codes(tmp_path)
             "query_email": "cranes_solute.1o@icloud.com",
             "access_key": "demo-key-001",
             "label": "order-1",
+            "category": "OpenAI OTP",
         },
         follow_redirects=True,
     )
     assert create_response.status_code == 200
     assert "demo-key-001" in create_response.text
     assert "cranes_solute.1o@icloud.com" in create_response.text
+    assert "OpenAI OTP" in create_response.text
+    assert "复制链接" in create_response.text
+    assert "导出选中链接" in create_response.text
 
     lookup_response = client.post(
         "/lookup",
@@ -309,15 +313,17 @@ def test_admin_can_edit_and_delete_key(tmp_path) -> None:
     assert missing_lookup.status_code == 404
 
 
-def test_admin_dashboard_supports_key_search_and_pagination(tmp_path) -> None:
+def test_admin_dashboard_supports_key_search_pagination_and_category_filter(tmp_path) -> None:
     store = KeyStore(tmp_path / "app.db")
     for index in range(1, 13):
         label = "special-order" if index == 7 else f"order-{index}"
+        category = "OpenAI" if index % 2 else "Apple"
         store.create_mapping(
             recipient_email=f"buyer{index:02d}@example.com",
             query_email="openai@eve.ink",
             access_key=f"buyer-key-{index:02d}",
             label=label,
+            category=category,
         )
 
     settings = AppSettings(
@@ -340,12 +346,22 @@ def test_admin_dashboard_supports_key_search_and_pagination(tmp_path) -> None:
     )
 
     search_response = client.get("/admin?q=special")
+    filter_response = client.get("/admin?category=OpenAI")
     page_two_response = client.get("/admin?page=2")
 
     assert search_response.status_code == 200
     assert 'name="q" value="special"' in search_response.text
     assert "buyer-key-07" in search_response.text
     assert "buyer-key-12" not in search_response.text
+
+    assert filter_response.status_code == 200
+    assert 'name="category"' in filter_response.text
+    assert 'option value="OpenAI" selected' in filter_response.text
+    assert "buyer-key-11" in filter_response.text
+    assert "buyer-key-12" not in filter_response.text
+    assert "复制链接" in filter_response.text
+    assert "导出选中链接" in filter_response.text
+    assert "compact-action-button" in filter_response.text
 
     assert page_two_response.status_code == 200
     assert "buyer-key-02" in page_two_response.text
@@ -355,25 +371,28 @@ def test_admin_dashboard_supports_key_search_and_pagination(tmp_path) -> None:
 
 
 
-def test_admin_can_batch_delete_keys(tmp_path) -> None:
+def test_admin_can_batch_delete_keys_and_export_links(tmp_path) -> None:
     store = KeyStore(tmp_path / "app.db")
     first = store.create_mapping(
         recipient_email="buyer1@example.com",
         query_email="openai@eve.ink",
         access_key="buyer-key-1",
         label="first",
+        category="OpenAI",
     )
     second = store.create_mapping(
         recipient_email="buyer2@example.com",
         query_email="openai@eve.ink",
         access_key="buyer-key-2",
         label="second",
+        category="Apple",
     )
     third = store.create_mapping(
         recipient_email="buyer3@example.com",
         query_email="openai@eve.ink",
         access_key="buyer-key-3",
         label="third",
+        category="OpenAI",
     )
 
     settings = AppSettings(
@@ -395,6 +414,12 @@ def test_admin_can_batch_delete_keys(tmp_path) -> None:
         follow_redirects=True,
     )
 
+    dashboard_response = client.get("/admin")
+    assert dashboard_response.status_code == 200
+    assert "导出选中链接" in dashboard_response.text
+    assert 'id="export-links-dialog"' in dashboard_response.text
+    assert 'data-copy-link-url="http://testserver/mailbox/buyer-key-1"' in dashboard_response.text
+
     response = client.post(
         "/admin/keys/batch-delete",
         data={"mapping_ids": [str(first.id), str(third.id)]},
@@ -409,6 +434,54 @@ def test_admin_can_batch_delete_keys(tmp_path) -> None:
     assert store.get_by_key("buyer-key-1") is None
     assert store.get_by_key(third.access_key) is None
     assert store.get_by_key(second.access_key) is not None
+
+
+
+def test_admin_can_batch_create_keys_from_multiple_recipient_lines(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    settings = AppSettings(
+        app_secret_key="test-secret",
+        app_admin_username="admin",
+        app_admin_password="pass123",
+        database_path=str(tmp_path / "app.db"),
+        cloudmail_base_url="https://mail.example.com",
+        cloudmail_admin_email="admin@example.com",
+        cloudmail_admin_password="secret",
+        lookup_email_limit=5,
+    )
+    app = create_app(settings=settings, store=store, cloudmail_client=FakeCloudMailClient())
+    client = TestClient(app)
+
+    client.post(
+        "/admin/login",
+        data={"username": "admin", "password": "pass123"},
+        follow_redirects=True,
+    )
+
+    response = client.post(
+        "/admin/keys",
+        data={
+            "recipient_email": "buyer1@example.com\nbuyer2@example.com\n\nbuyer3@example.com",
+            "query_email": "openai@eve.ink",
+            "access_key": "",
+            "label": "bundle-order",
+            "category": "ChatGPT",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert "已批量创建 3 个 Key" in response.text
+    assert 'textarea name="recipient_email"' in response.text
+    assert "分类" in response.text
+    assert store.count_mappings() == 3
+    assert all(mapping.category == "ChatGPT" for mapping in store.list_mappings())
+    assert {mapping.recipient_email for mapping in store.list_mappings()} == {
+        "buyer1@example.com",
+        "buyer2@example.com",
+        "buyer3@example.com",
+    }
+    assert all(mapping.access_key for mapping in store.list_mappings())
 
 
 

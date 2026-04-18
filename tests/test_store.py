@@ -11,6 +11,7 @@ def test_key_store_persists_and_lists_mappings(tmp_path) -> None:
         query_email=" OpenAI@eve.ink ",
         access_key="demo-key-001",
         label="demo",
+        category="OpenAI OTP",
     )
 
     loaded = store.get_by_key("demo-key-001")
@@ -18,11 +19,14 @@ def test_key_store_persists_and_lists_mappings(tmp_path) -> None:
 
     assert created.recipient_email == "cranes_solute.1o@icloud.com"
     assert created.query_email == "openai@eve.ink"
+    assert created.category == "OpenAI OTP"
     assert loaded is not None
     assert loaded.recipient_email == "cranes_solute.1o@icloud.com"
     assert loaded.query_email == "openai@eve.ink"
+    assert loaded.category == "OpenAI OTP"
     assert listed[0].access_key == "demo-key-001"
     assert listed[0].label == "demo"
+    assert listed[0].category == "OpenAI OTP"
 
 
 def test_key_store_generates_key_when_not_provided(tmp_path) -> None:
@@ -72,7 +76,7 @@ def test_key_store_updates_and_deletes_mapping(tmp_path) -> None:
     assert store.get_by_key("buyer-key-2") is None
 
 
-def test_key_store_supports_search_pagination_and_batch_delete(tmp_path) -> None:
+def test_key_store_supports_search_pagination_category_filter_and_batch_delete(tmp_path) -> None:
     store = KeyStore(tmp_path / "app.db")
 
     alpha_key = store.create_mapping(
@@ -80,33 +84,41 @@ def test_key_store_supports_search_pagination_and_batch_delete(tmp_path) -> None
         query_email="openai@eve.ink",
         access_key="alpha-key-1",
         label="starter",
+        category="OpenAI",
     )
     beta_key = store.create_mapping(
         recipient_email="beta@example.com",
         query_email="openai@eve.ink",
         access_key="beta-key-1",
         label="alpha label",
+        category="Apple",
     )
     gamma_key = store.create_mapping(
         recipient_email="gamma@example.com",
         query_email="alpha@eve.ink",
         access_key="gamma-key-1",
         label="normal",
+        category="OpenAI",
     )
     store.create_mapping(
         recipient_email="delta@example.com",
         query_email="mail@eve.ink",
         access_key="delta-key-1",
         label="normal",
+        category="",
     )
 
     page_one = store.list_mappings(search_query="alpha", limit=2, offset=0)
     page_two = store.list_mappings(search_query="alpha", limit=2, offset=2)
+    openai_only = store.list_mappings(category_filter="openai")
     total = store.count_mappings(search_query="alpha")
+    categories = store.list_categories()
 
     assert total == 3
     assert [item.access_key for item in page_one] == ["gamma-key-1", "beta-key-1"]
     assert [item.access_key for item in page_two] == ["alpha-key-1"]
+    assert [item.access_key for item in openai_only] == ["gamma-key-1", "alpha-key-1"]
+    assert categories == ["Apple", "OpenAI"]
 
     deleted = store.delete_mappings([alpha_key.id, gamma_key.id])
 

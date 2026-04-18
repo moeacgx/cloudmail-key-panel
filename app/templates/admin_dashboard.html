@@ -43,7 +43,7 @@
   </div>
 
   <div class="action-row top-gap">
-    <button type="button" class="secondary" data-cloudmail-config-trigger>编辑 CloudMail 配置</button>
+    <button type="button" class="secondary compact-action-button" data-cloudmail-config-trigger>编辑 CloudMail 配置</button>
   </div>
 
   <dialog id="cloudmail-config-dialog" class="mapping-dialog">
@@ -52,10 +52,11 @@
         <h3>编辑 CloudMail 配置</h3>
         <p>配置放进弹窗里，平时不用一直占着页面空间。</p>
       </div>
-      <button type="button" class="secondary" data-close-dialog>关闭</button>
+      <button type="button" class="secondary compact-action-button" data-close-dialog>关闭</button>
     </div>
     <form method="post" action="/admin/cloudmail" class="stack-form">
       <input type="hidden" name="q" value="{{ search_query }}">
+      <input type="hidden" name="category" value="{{ current_category }}">
       <input type="hidden" name="page" value="{{ current_page }}">
       <label>
         <span>CloudMail 地址</span>
@@ -83,7 +84,7 @@
       </label>
       <div class="action-row">
         <button type="submit">保存 CloudMail 配置</button>
-        <button type="button" class="secondary" data-close-dialog>取消</button>
+        <button type="button" class="secondary compact-action-button" data-close-dialog>取消</button>
       </div>
     </form>
   </dialog>
@@ -93,14 +94,14 @@
   <div class="mailbox-header">
     <div>
       <h2>创建查看 Key</h2>
-      <p>原始收件人邮箱是前台展示给用户看的邮箱；CloudMail 查询邮箱则是实际调用 CloudMail API 用的收件地址。</p>
+      <p>原始收件人邮箱支持一行一个批量导入；批量创建时会自动为每个邮箱生成单独的 Key。</p>
     </div>
   </div>
 
   <form method="post" action="/admin/keys" class="stack-form">
     <label>
       <span>原始收件人邮箱</span>
-      <input type="email" name="recipient_email" placeholder="cranes_solute.1o@icloud.com" required>
+      <textarea name="recipient_email" rows="5" placeholder="cranes_solute.1o@icloud.com&#10;buyer2@example.com&#10;buyer3@example.com" required></textarea>
     </label>
     <label>
       <span>CloudMail 查询邮箱</span>
@@ -108,11 +109,15 @@
     </label>
     <label>
       <span>自定义 Key（可选）</span>
-      <input type="text" name="access_key" placeholder="留空则自动生成">
+      <input type="text" name="access_key" placeholder="单个邮箱时可自定义；批量导入时请留空自动生成">
     </label>
     <label>
       <span>备注（可选）</span>
       <input type="text" name="label" placeholder="例如订单号 / 商品名">
+    </label>
+    <label>
+      <span>分类（可选）</span>
+      <input type="text" name="category" list="category-options" placeholder="例如：OpenAI OTP / Apple / Steam">
     </label>
     <button type="submit">生成并保存</button>
   </form>
@@ -122,7 +127,7 @@
   <div class="mailbox-header">
     <div>
       <h2>已创建的 Key</h2>
-      <p>当前共 {{ total_mappings }} 个 Key，可搜索、翻页、批量删除。</p>
+      <p>当前共 {{ total_mappings }} 个 Key，可搜索、按分类筛选、翻页、批量删除、批量导出链接。</p>
     </div>
   </div>
 
@@ -131,10 +136,19 @@
       <span>搜索 Key / 收件人 / 查询邮箱 / 备注</span>
       <input type="text" name="q" value="{{ search_query }}" placeholder="输入关键词筛选">
     </label>
+    <label class="toolbar-category">
+      <span>分类筛选</span>
+      <select name="category">
+        <option value="">全部分类</option>
+        {% for category_name in categories %}
+          <option value="{{ category_name }}" {% if current_category == category_name %}selected{% endif %}>{{ category_name }}</option>
+        {% endfor %}
+      </select>
+    </label>
     <div class="action-row">
-      <button type="submit">搜索</button>
-      {% if search_query %}
-        <a class="button secondary" href="/admin">清空筛选</a>
+      <button type="submit" class="compact-action-button">搜索</button>
+      {% if search_query or current_category %}
+        <a class="button secondary compact-action-button" href="/admin">清空筛选</a>
       {% endif %}
     </div>
   </form>
@@ -142,6 +156,7 @@
   {% if mappings %}
     <form method="post" action="/admin/keys/batch-delete" class="stack-form">
       <input type="hidden" name="q" value="{{ search_query }}">
+      <input type="hidden" name="category" value="{{ current_category }}">
       <input type="hidden" name="page" value="{{ current_page }}">
 
       <div class="action-row toolbar-row">
@@ -149,16 +164,20 @@
           <input type="checkbox" data-select-all>
           <span>全选本页</span>
         </label>
-        <button type="submit" class="danger">批量删除选中</button>
+        <div class="action-row">
+          <button type="button" class="secondary compact-action-button" data-export-selected-links>导出选中链接</button>
+          <button type="submit" class="danger compact-action-button">批量删除选中</button>
+        </div>
         <span class="meta">第 {{ current_page }} / {{ total_pages }} 页</span>
       </div>
 
       <div class="mapping-list">
         {% for item in mappings %}
+          {% set frontend_url = request.url_for('mailbox', access_key=item.access_key) %}
           <article class="mapping-card compact-mapping-card">
             <div class="action-row compact-selection-row">
               <label class="selection-toggle">
-                <input type="checkbox" name="mapping_ids" value="{{ item.id }}" data-row-selector>
+                <input type="checkbox" name="mapping_ids" value="{{ item.id }}" data-row-selector data-link-url="{{ frontend_url }}">
                 <span>选中这个 Key</span>
               </label>
             </div>
@@ -179,24 +198,30 @@
                 <span class="mapping-field-label">备注</span>
                 <span>{{ item.label or '—' }}</span>
               </div>
+              <div class="mapping-field">
+                <span class="mapping-field-label">分类</span>
+                <span>{{ item.category or '未分类' }}</span>
+              </div>
             </div>
             <div class="mapping-meta">
               <span>ID：{{ item.id }}</span>
               <span>创建时间：{{ item.created_at }}</span>
             </div>
-            <div class="action-row">
-              <a class="button secondary" href="/mailbox/{{ item.access_key }}" target="_blank">打开前台</a>
+            <div class="action-row key-action-row">
+              <a class="button secondary compact-action-button" href="{{ frontend_url }}" target="_blank">打开前台</a>
+              <button type="button" class="secondary compact-action-button" data-copy-link-url="{{ frontend_url }}">复制链接</button>
               <button
                 type="button"
-                class="secondary"
+                class="secondary compact-action-button"
                 data-edit-key-trigger
                 data-id="{{ item.id }}"
                 data-recipient-email="{{ item.recipient_email }}"
                 data-query-email="{{ item.query_email }}"
                 data-access-key="{{ item.access_key }}"
                 data-label="{{ item.label }}"
+                data-category="{{ item.category }}"
               >编辑这个 Key</button>
-              <button type="submit" formaction="/admin/keys/{{ item.id }}/delete" class="danger" formnovalidate>删除这个 Key</button>
+              <button type="submit" formaction="/admin/keys/{{ item.id }}/delete" class="danger compact-action-button" formnovalidate>删除这个 Key</button>
             </div>
           </article>
         {% endfor %}
@@ -207,14 +232,16 @@
       <div class="pagination-row">
         <form method="get" action="/admin" class="inline-form">
           <input type="hidden" name="q" value="{{ search_query }}">
+          <input type="hidden" name="category" value="{{ current_category }}">
           <input type="hidden" name="page" value="{{ previous_page }}">
-          <button type="submit" class="secondary" {% if not has_previous_page %}disabled{% endif %}>上一页</button>
+          <button type="submit" class="secondary compact-action-button" {% if not has_previous_page %}disabled{% endif %}>上一页</button>
         </form>
         <span class="pagination-status">第 {{ current_page }} / {{ total_pages }} 页</span>
         <form method="get" action="/admin" class="inline-form">
           <input type="hidden" name="q" value="{{ search_query }}">
+          <input type="hidden" name="category" value="{{ current_category }}">
           <input type="hidden" name="page" value="{{ next_page }}">
-          <button type="submit" class="secondary" {% if not has_next_page %}disabled{% endif %}>下一页</button>
+          <button type="submit" class="secondary compact-action-button" {% if not has_next_page %}disabled{% endif %}>下一页</button>
         </form>
       </div>
     {% endif %}
@@ -225,10 +252,11 @@
           <h3>编辑 Key</h3>
           <p>这里只在点击编辑时弹出，不会把所有 Key 的内容都展开占满页面。</p>
         </div>
-        <button type="button" class="secondary" data-close-dialog>关闭</button>
+        <button type="button" class="secondary compact-action-button" data-close-dialog>关闭</button>
       </div>
       <form id="mapping-edit-form" method="post" class="stack-form">
         <input type="hidden" name="q" value="{{ search_query }}">
+        <input type="hidden" name="category" value="{{ current_category }}">
         <input type="hidden" name="page" value="{{ current_page }}">
         <div class="mapping-grid">
           <label>
@@ -247,24 +275,72 @@
             <span>备注</span>
             <input id="edit-label" type="text" name="label" placeholder="例如订单号 / 商品名">
           </label>
+          <label>
+            <span>分类</span>
+            <input id="edit-category" type="text" name="category_value" list="category-options" placeholder="例如：OpenAI OTP / Apple / Steam">
+          </label>
         </div>
         <div class="action-row">
           <button type="submit">保存修改</button>
-          <button type="button" class="secondary" data-close-dialog>取消</button>
+          <button type="button" class="secondary compact-action-button" data-close-dialog>取消</button>
         </div>
       </form>
     </dialog>
 
+    <dialog id="export-links-dialog" class="mapping-dialog">
+      <div class="dialog-header">
+        <div>
+          <h3>导出选中链接</h3>
+          <p>下面是一行一个的链接，复制给买家会更方便。</p>
+        </div>
+        <button type="button" class="secondary compact-action-button" data-close-dialog>关闭</button>
+      </div>
+      <div class="stack-form">
+        <label>
+          <span>链接列表</span>
+          <textarea id="export-links-output" rows="10" readonly placeholder="先勾选要导出的 Key，再点“导出选中链接”"></textarea>
+        </label>
+        <div class="action-row">
+          <button type="button" class="secondary compact-action-button" data-copy-exported-links>复制全部链接</button>
+          <button type="button" class="secondary compact-action-button" data-close-dialog>取消</button>
+        </div>
+      </div>
+    </dialog>
   {% else %}
-    <div class="alert">{{ '没有匹配到任何 Key。' if search_query else '暂时还没有 Key。' }}</div>
+    <div class="alert">{{ '没有匹配到任何 Key。' if search_query or current_category else '暂时还没有 Key。' }}</div>
   {% endif %}
 </section>
+
+<datalist id="category-options">
+  {% for category_name in categories %}
+    <option value="{{ category_name }}"></option>
+  {% endfor %}
+</datalist>
 
 <script>
   (() => {
     const cloudmailDialog = document.getElementById('cloudmail-config-dialog');
     const mappingDialog = document.getElementById('mapping-edit-dialog');
+    const exportDialog = document.getElementById('export-links-dialog');
     const mappingForm = document.getElementById('mapping-edit-form');
+    const exportOutput = document.getElementById('export-links-output');
+
+    const copyText = async (value) => {
+      if (!value) return;
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+        return;
+      }
+      const fallback = document.createElement('textarea');
+      fallback.value = value;
+      fallback.setAttribute('readonly', 'readonly');
+      fallback.style.position = 'absolute';
+      fallback.style.left = '-9999px';
+      document.body.appendChild(fallback);
+      fallback.select();
+      document.execCommand('copy');
+      fallback.remove();
+    };
 
     document.querySelectorAll('[data-cloudmail-config-trigger]').forEach((button) => {
       button.addEventListener('click', () => cloudmailDialog?.showModal());
@@ -275,6 +351,7 @@
       const queryInput = document.getElementById('edit-query-email');
       const keyInput = document.getElementById('edit-access-key');
       const labelInput = document.getElementById('edit-label');
+      const categoryInput = document.getElementById('edit-category');
 
       document.querySelectorAll('[data-edit-key-trigger]').forEach((button) => {
         button.addEventListener('click', () => {
@@ -283,10 +360,17 @@
           queryInput.value = button.dataset.queryEmail || '';
           keyInput.value = button.dataset.accessKey || '';
           labelInput.value = button.dataset.label || '';
+          categoryInput.value = button.dataset.category || '';
           mappingDialog.showModal();
         });
       });
     }
+
+    document.querySelectorAll('[data-copy-link-url]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        await copyText(button.dataset.copyLinkUrl || '');
+      });
+    });
 
     document.querySelectorAll('dialog [data-close-dialog]').forEach((button) => {
       button.addEventListener('click', () => button.closest('dialog')?.close());
@@ -301,6 +385,26 @@
         });
       });
     }
+
+    document.querySelectorAll('[data-export-selected-links]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const links = rowSelectors.filter((checkbox) => checkbox.checked).map((checkbox) => checkbox.dataset.linkUrl || '');
+        if (!links.length) {
+          window.alert('请先勾选要导出的 Key');
+          return;
+        }
+        if (exportOutput) {
+          exportOutput.value = links.join('\n');
+        }
+        exportDialog?.showModal();
+      });
+    });
+
+    document.querySelectorAll('[data-copy-exported-links]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        await copyText(exportOutput?.value || '');
+      });
+    });
   })();
 </script>
 {% endblock %}

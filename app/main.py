@@ -159,10 +159,10 @@ def create_app(
         )
 
     @app.get("/admin", response_class=HTMLResponse)
-    def admin_dashboard(request: Request, q: str = "", page: int = 1) -> Response:
+    def admin_dashboard(request: Request, q: str = "", category: str = "", page: int = 1) -> Response:
         if not _is_admin(request):
             return RedirectResponse(url="/admin/login", status_code=status.HTTP_303_SEE_OTHER)
-        return _render_admin_dashboard(request, search_query=q, page=page)
+        return _render_admin_dashboard(request, search_query=q, category_filter=category, page=page)
 
     @app.post("/admin/cloudmail")
     def admin_save_cloudmail_settings(
@@ -174,6 +174,7 @@ def create_app(
         default_query_email: str = Form(""),
         recent_email_limit: str = Form(...),
         q: str = Form(""),
+        category: str = Form(""),
         page: int = Form(1),
     ) -> Response:
         if not _is_admin(request):
@@ -194,10 +195,17 @@ def create_app(
                 error=_translate_store_error(str(exc)),
                 status_code=status.HTTP_400_BAD_REQUEST,
                 search_query=q,
+                category_filter=category,
                 page=page,
             )
 
-        return _render_admin_dashboard(request, message="CloudMail 配置已保存", search_query=q, page=page)
+        return _render_admin_dashboard(
+            request,
+            message="CloudMail 配置已保存",
+            search_query=q,
+            category_filter=category,
+            page=page,
+        )
 
     @app.post("/admin/keys")
     def admin_create_key(
@@ -206,21 +214,30 @@ def create_app(
         query_email: str = Form(""),
         access_key: str = Form(""),
         label: str = Form(""),
+        category: str = Form(""),
     ) -> Response:
         if not _is_admin(request):
             return RedirectResponse(url="/admin/login", status_code=status.HTTP_303_SEE_OTHER)
 
         try:
-            request.app.state.store.create_mapping(
-                recipient_email=recipient_email,
-                query_email=_resolve_query_email(request, query_email),
-                access_key=access_key or None,
-                label=label,
-            )
+            recipient_emails = _parse_recipient_emails(recipient_email)
+            if len(recipient_emails) > 1 and access_key.strip():
+                raise ValueError("批量导入多个邮箱时不能自定义单个 Key，请留空自动生成")
+
+            resolved_query_email = _resolve_query_email(request, query_email)
+            for index, email in enumerate(recipient_emails):
+                request.app.state.store.create_mapping(
+                    recipient_email=email,
+                    query_email=resolved_query_email,
+                    access_key=access_key if index == 0 and len(recipient_emails) == 1 else None,
+                    label=label,
+                    category=category,
+                )
         except ValueError as exc:
             return _render_admin_dashboard(request, error=_translate_store_error(str(exc)), status_code=status.HTTP_400_BAD_REQUEST)
 
-        return RedirectResponse(url="/admin", status_code=status.HTTP_303_SEE_OTHER)
+        message = "Key 已创建" if len(recipient_emails) == 1 else f"已批量创建 {len(recipient_emails)} 个 Key"
+        return _render_admin_dashboard(request, message=message)
 
     @app.post("/admin/keys/{mapping_id}/update")
     def admin_update_key(
@@ -230,7 +247,9 @@ def create_app(
         query_email: str = Form(""),
         access_key: str = Form(...),
         label: str = Form(""),
+        category_value: str = Form(""),
         q: str = Form(""),
+        category: str = Form(""),
         page: int = Form(1),
     ) -> Response:
         if not _is_admin(request):
@@ -243,6 +262,7 @@ def create_app(
                 query_email=_resolve_query_email(request, query_email),
                 access_key=access_key,
                 label=label,
+                category=category_value,
             )
         except ValueError as exc:
             return _render_admin_dashboard(
@@ -250,13 +270,26 @@ def create_app(
                 error=_translate_store_error(str(exc)),
                 status_code=status.HTTP_400_BAD_REQUEST,
                 search_query=q,
+                category_filter=category,
                 page=page,
             )
 
-        return _render_admin_dashboard(request, message="Key 已更新", search_query=q, page=page)
+        return _render_admin_dashboard(
+            request,
+            message="Key 已更新",
+            search_query=q,
+            category_filter=category,
+            page=page,
+        )
 
     @app.post("/admin/keys/{mapping_id}/delete")
-    def admin_delete_key(request: Request, mapping_id: int, q: str = Form(""), page: int = Form(1)) -> Response:
+    def admin_delete_key(
+        request: Request,
+        mapping_id: int,
+        q: str = Form(""),
+        category: str = Form(""),
+        page: int = Form(1),
+    ) -> Response:
         if not _is_admin(request):
             return RedirectResponse(url="/admin/login", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -268,16 +301,24 @@ def create_app(
                 error=_translate_store_error(str(exc)),
                 status_code=status.HTTP_400_BAD_REQUEST,
                 search_query=q,
+                category_filter=category,
                 page=page,
             )
 
-        return _render_admin_dashboard(request, message="Key 已删除", search_query=q, page=page)
+        return _render_admin_dashboard(
+            request,
+            message="Key 已删除",
+            search_query=q,
+            category_filter=category,
+            page=page,
+        )
 
     @app.post("/admin/keys/batch-delete")
     def admin_batch_delete_keys(
         request: Request,
         mapping_ids: list[int] = Form([]),
         q: str = Form(""),
+        category: str = Form(""),
         page: int = Form(1),
     ) -> Response:
         if not _is_admin(request):
@@ -291,6 +332,7 @@ def create_app(
                 error=_translate_store_error(str(exc)),
                 status_code=status.HTTP_400_BAD_REQUEST,
                 search_query=q,
+                category_filter=category,
                 page=page,
             )
 
@@ -298,6 +340,7 @@ def create_app(
             request,
             message=f"已批量删除 {deleted_count} 个 Key",
             search_query=q,
+            category_filter=category,
             page=page,
         )
 
@@ -320,28 +363,36 @@ def _render_admin_dashboard(
     message: str | None = None,
     status_code: int = 200,
     search_query: str = "",
+    category_filter: str = "",
     page: int = 1,
 ) -> HTMLResponse:
     normalized_page = max(page, 1)
-    total_mappings = request.app.state.store.count_mappings(search_query=search_query)
+    total_mappings = request.app.state.store.count_mappings(
+        search_query=search_query,
+        category_filter=category_filter,
+    )
     total_pages = max((total_mappings - 1) // ADMIN_PAGE_SIZE + 1, 1)
     current_page = min(normalized_page, total_pages)
     offset = (current_page - 1) * ADMIN_PAGE_SIZE
     mappings = request.app.state.store.list_mappings(
         search_query=search_query,
+        category_filter=category_filter,
         limit=ADMIN_PAGE_SIZE,
         offset=offset,
     )
+    categories = request.app.state.store.list_categories()
     cloudmail_config = _get_cloudmail_settings_for_display(request)
     return _render(
         request,
         "admin_dashboard.html",
         {
             "mappings": mappings,
+            "categories": categories,
             "cloudmail_config": cloudmail_config,
             "error": error,
             "message": message,
             "search_query": search_query,
+            "current_category": category_filter,
             "current_page": current_page,
             "total_pages": total_pages,
             "total_mappings": total_mappings,
@@ -385,6 +436,26 @@ def _resolve_query_email(request: Request, query_email: str) -> str | None:
 
     default_query_email = _get_cloudmail_settings_for_display(request).default_query_email.strip().lower()
     return default_query_email or None
+
+
+def _parse_recipient_emails(raw_value: str) -> list[str]:
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    for line in (raw_value or "").splitlines():
+        normalized = line.strip().lower()
+        if not normalized:
+            continue
+        if not re.fullmatch(_EMAIL_PATTERN, normalized, re.IGNORECASE):
+            raise ValueError(f"原始收件人邮箱格式不正确：{line.strip()}")
+        if normalized not in seen:
+            candidates.append(normalized)
+            seen.add(normalized)
+
+    if not candidates:
+        raise ValueError("recipient_email is required")
+
+    return candidates
 
 
 def _get_cloudmail_client(request: Request) -> Any:

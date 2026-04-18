@@ -14,6 +14,7 @@ class AccessMapping:
     query_email: str
     access_key: str
     label: str
+    category: str
     created_at: str
 
 
@@ -40,11 +41,13 @@ class KeyStore:
         query_email: str | None = None,
         access_key: str | None = None,
         label: str = "",
+        category: str = "",
     ) -> AccessMapping:
         normalized_email = recipient_email.strip().lower()
         normalized_query_email = (query_email or normalized_email).strip().lower()
         normalized_key = (access_key or self._generate_key()).strip()
         normalized_label = label.strip()
+        normalized_category = category.strip()
 
         if not normalized_email:
             raise ValueError("recipient_email is required")
@@ -59,10 +62,17 @@ class KeyStore:
             with self._connect() as connection:
                 cursor = connection.execute(
                     """
-                    INSERT INTO access_mappings (recipient_email, query_email, access_key, label, created_at)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO access_mappings (recipient_email, query_email, access_key, label, category, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     """,
-                    (normalized_email, normalized_query_email, normalized_key, normalized_label, created_at),
+                    (
+                        normalized_email,
+                        normalized_query_email,
+                        normalized_key,
+                        normalized_label,
+                        normalized_category,
+                        created_at,
+                    ),
                 )
                 connection.commit()
         except sqlite3.IntegrityError as exc:
@@ -74,6 +84,7 @@ class KeyStore:
             query_email=normalized_query_email,
             access_key=normalized_key,
             label=normalized_label,
+            category=normalized_category,
             created_at=created_at,
         )
 
@@ -84,11 +95,13 @@ class KeyStore:
         query_email: str | None,
         access_key: str,
         label: str = "",
+        category: str = "",
     ) -> AccessMapping:
         normalized_email = recipient_email.strip().lower()
         normalized_query_email = (query_email or normalized_email).strip().lower()
         normalized_key = access_key.strip()
         normalized_label = label.strip()
+        normalized_category = category.strip()
 
         if not normalized_email:
             raise ValueError("recipient_email is required")
@@ -102,10 +115,17 @@ class KeyStore:
                 cursor = connection.execute(
                     """
                     UPDATE access_mappings
-                    SET recipient_email = ?, query_email = ?, access_key = ?, label = ?
+                    SET recipient_email = ?, query_email = ?, access_key = ?, label = ?, category = ?
                     WHERE id = ?
                     """,
-                    (normalized_email, normalized_query_email, normalized_key, normalized_label, mapping_id),
+                    (
+                        normalized_email,
+                        normalized_query_email,
+                        normalized_key,
+                        normalized_label,
+                        normalized_category,
+                        mapping_id,
+                    ),
                 )
                 connection.commit()
         except sqlite3.IntegrityError as exc:
@@ -130,7 +150,7 @@ class KeyStore:
     def get_by_id(self, mapping_id: int) -> AccessMapping | None:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT id, recipient_email, query_email, access_key, label, created_at FROM access_mappings WHERE id = ?",
+                "SELECT id, recipient_email, query_email, access_key, label, category, created_at FROM access_mappings WHERE id = ?",
                 (mapping_id,),
             ).fetchone()
 
@@ -139,7 +159,7 @@ class KeyStore:
     def get_by_key(self, access_key: str) -> AccessMapping | None:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT id, recipient_email, query_email, access_key, label, created_at FROM access_mappings WHERE access_key = ?",
+                "SELECT id, recipient_email, query_email, access_key, label, category, created_at FROM access_mappings WHERE access_key = ?",
                 (access_key.strip(),),
             ).fetchone()
 
@@ -148,11 +168,12 @@ class KeyStore:
     def list_mappings(
         self,
         search_query: str = "",
+        category_filter: str = "",
         limit: int | None = None,
         offset: int = 0,
     ) -> list[AccessMapping]:
-        where_clause, params = self._build_mapping_search(search_query)
-        query = "SELECT id, recipient_email, query_email, access_key, label, created_at FROM access_mappings"
+        where_clause, params = self._build_mapping_filters(search_query, category_filter)
+        query = "SELECT id, recipient_email, query_email, access_key, label, category, created_at FROM access_mappings"
         if where_clause:
             query = f"{query} WHERE {where_clause}"
         query = f"{query} ORDER BY id DESC"
@@ -165,14 +186,22 @@ class KeyStore:
 
         return [mapping for row in rows if (mapping := self._row_to_mapping(row)) is not None]
 
-    def count_mappings(self, search_query: str = "") -> int:
-        where_clause, params = self._build_mapping_search(search_query)
+    def count_mappings(self, search_query: str = "", category_filter: str = "") -> int:
+        where_clause, params = self._build_mapping_filters(search_query, category_filter)
         query = "SELECT COUNT(*) FROM access_mappings"
         if where_clause:
             query = f"{query} WHERE {where_clause}"
 
         with self._connect() as connection:
             return int(connection.execute(query, tuple(params)).fetchone()[0])
+
+    def list_categories(self) -> list[str]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT DISTINCT category FROM access_mappings WHERE TRIM(category) != '' ORDER BY LOWER(category) ASC"
+            ).fetchall()
+
+        return [str(row[0]) for row in rows]
 
     def delete_mappings(self, mapping_ids: list[int]) -> int:
         normalized_ids = sorted({int(mapping_id) for mapping_id in mapping_ids})
@@ -287,6 +316,7 @@ class KeyStore:
                     query_email TEXT NOT NULL DEFAULT '',
                     access_key TEXT NOT NULL UNIQUE,
                     label TEXT NOT NULL DEFAULT '',
+                    category TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL
                 )
                 """
@@ -308,6 +338,10 @@ class KeyStore:
                 connection.execute(
                     "ALTER TABLE access_mappings ADD COLUMN query_email TEXT NOT NULL DEFAULT ''"
                 )
+            if "category" not in columns:
+                connection.execute(
+                    "ALTER TABLE access_mappings ADD COLUMN category TEXT NOT NULL DEFAULT ''"
+                )
             connection.execute(
                 "UPDATE access_mappings SET query_email = recipient_email WHERE query_email = '' OR query_email IS NULL"
             )
@@ -319,17 +353,26 @@ class KeyStore:
         return connection
 
     @staticmethod
-    def _build_mapping_search(search_query: str) -> tuple[str, list[str]]:
-        normalized_query = search_query.strip().lower()
-        if not normalized_query:
-            return "", []
+    def _build_mapping_filters(search_query: str, category_filter: str) -> tuple[str, list[str]]:
+        clauses: list[str] = []
+        params: list[str] = []
 
-        wildcard = f"%{normalized_query}%"
-        clause = " OR ".join(
-            f"LOWER({column}) LIKE ?"
-            for column in ("recipient_email", "query_email", "access_key", "label")
-        )
-        return clause, [wildcard, wildcard, wildcard, wildcard]
+        normalized_query = search_query.strip().lower()
+        if normalized_query:
+            wildcard = f"%{normalized_query}%"
+            search_clause = " OR ".join(
+                f"LOWER({column}) LIKE ?"
+                for column in ("recipient_email", "query_email", "access_key", "label", "category")
+            )
+            clauses.append(f"({search_clause})")
+            params.extend([wildcard] * 5)
+
+        normalized_category = category_filter.strip().lower()
+        if normalized_category:
+            clauses.append("LOWER(category) = ?")
+            params.append(normalized_category)
+
+        return " AND ".join(clauses), params
 
     @staticmethod
     def _normalize_recent_email_limit(value: int | str) -> int:
@@ -359,5 +402,6 @@ class KeyStore:
             query_email=row["query_email"],
             access_key=row["access_key"],
             label=row["label"],
+            category=row["category"],
             created_at=row["created_at"],
         )
