@@ -574,6 +574,8 @@ def test_mailbox_supports_live_fragment_refresh_without_full_page_reload(tmp_pat
 
     assert page_response.status_code == 200
     assert 'data-mailbox-live-region' in page_response.text
+    assert 'data-mailbox-loading-indicator' in page_response.text
+    assert '正在获取新邮件' in page_response.text
     assert '/mailbox/live-key/fragment' in page_response.text
     assert 'setInterval' in page_response.text
 

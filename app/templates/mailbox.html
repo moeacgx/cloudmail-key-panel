@@ -2,6 +2,10 @@
 
 {% block content %}
 <section class="card">
+  <div class="mailbox-live-toolbar" data-mailbox-loading-indicator hidden>
+    <span class="mailbox-loader-spinner" aria-hidden="true"></span>
+    <span>正在获取新邮件…</span>
+  </div>
   <div
     id="mailbox-live-region"
     data-mailbox-live-region
@@ -15,6 +19,7 @@
 <script>
   (() => {
     const region = document.querySelector('[data-mailbox-live-region]');
+    const loadingIndicator = document.querySelector('[data-mailbox-loading-indicator]');
     if (!region) return;
 
     const fragmentUrl = region.dataset.fragmentUrl;
@@ -23,9 +28,15 @@
 
     let refreshing = false;
 
+    const setLoading = (loading) => {
+      if (!loadingIndicator) return;
+      loadingIndicator.hidden = !loading;
+    };
+
     const refreshMailbox = async () => {
       if (refreshing) return;
       refreshing = true;
+      setLoading(true);
       try {
         const response = await fetch(fragmentUrl, {
           headers: { 'X-Requested-With': 'mailbox-live-refresh' },
@@ -36,6 +47,7 @@
       } catch (error) {
         console.warn('mailbox refresh failed', error);
       } finally {
+        setLoading(false);
         refreshing = false;
       }
     };

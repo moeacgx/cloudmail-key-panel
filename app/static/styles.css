@@ -162,6 +162,34 @@ button,
   gap: 16px;
 }
 
+.mailbox-live-toolbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: var(--primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.mailbox-loader-spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 2px solid rgba(37, 99, 235, 0.2);
+  border-top-color: var(--primary);
+  animation: mailbox-spin 0.8s linear infinite;
+}
+
+@keyframes mailbox-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .mail-refresh-hint {
   margin: 0 0 16px;
   color: var(--muted);
