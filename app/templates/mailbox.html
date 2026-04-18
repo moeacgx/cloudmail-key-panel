@@ -49,7 +49,7 @@
           </article>
         {% endfor %}
       </div>
-    {% else %}
+    {% elif not notice %}
       <div class="alert">当前没有查到邮件。</div>
     {% endif %}
   {% endif %}
