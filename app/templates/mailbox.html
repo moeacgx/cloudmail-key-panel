@@ -47,8 +47,16 @@
               {% endif %}
             </div>
 
-            <div class="preview-box">
-              {{ item.preview }}
+            <div class="mail-preview-stack">
+              <div class="preview-snippet">
+                {{ item.preview }}
+              </div>
+              <details class="mail-preview-details">
+                <summary class="mail-preview-summary">展开完整邮件内容</summary>
+                <div class="preview-box">
+                  {{ item.preview }}
+                </div>
+              </details>
             </div>
           </article>
         {% endfor %}

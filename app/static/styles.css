@@ -234,11 +234,42 @@ button,
   letter-spacing: 0;
 }
 
-.preview-box {
+.mail-preview-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.preview-snippet {
   white-space: pre-wrap;
-  background: #f8fafc;
+  line-height: 1.6;
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.mail-preview-details {
   border: 1px solid var(--border);
   border-radius: 12px;
+  background: #f8fafc;
+}
+
+.mail-preview-summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 10px 14px;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.mail-preview-summary::-webkit-details-marker {
+  display: none;
+}
+
+.preview-box {
+  white-space: pre-wrap;
+  border-top: 1px solid var(--border);
   padding: 14px;
   line-height: 1.6;
 }

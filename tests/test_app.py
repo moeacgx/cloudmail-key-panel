@@ -485,6 +485,53 @@ def test_admin_can_batch_create_keys_from_multiple_recipient_lines(tmp_path) -> 
 
 
 
+def test_mailbox_uses_compact_expandable_preview(tmp_path) -> None:
+    fake_cloudmail = FakeCloudMailClient(
+        messages=[
+            CloudMailMessage(
+                email_id=1,
+                send_email="noreply@tm.openai.com",
+                send_name="OpenAI",
+                subject="你的临时 ChatGPT 登录代码",
+                to_email="buyer@example.com",
+                to_name="",
+                create_time="2026-04-18 10:56:53",
+                type=0,
+                content="<div>第一行</div><div>第二行</div><div>第三行</div><div>第四行</div><div>第五行</div>",
+                text="第一行\n第二行\n第三行\n第四行\n第五行",
+                is_del=0,
+            )
+        ]
+    )
+    store = KeyStore(tmp_path / "app.db")
+    store.create_mapping(
+        recipient_email="buyer@example.com",
+        query_email="buyer@example.com",
+        access_key="compact-key",
+        label="demo",
+    )
+    settings = AppSettings(
+        app_secret_key="test-secret",
+        app_admin_username="admin",
+        app_admin_password="pass123",
+        database_path=str(tmp_path / "app.db"),
+        cloudmail_base_url="https://mail.example.com",
+        cloudmail_admin_email="admin@example.com",
+        cloudmail_admin_password="secret",
+        lookup_email_limit=5,
+    )
+    app = create_app(settings=settings, store=store, cloudmail_client=fake_cloudmail)
+    client = TestClient(app)
+
+    response = client.get("/mailbox/compact-key")
+
+    assert response.status_code == 200
+    assert 'class="preview-snippet"' in response.text
+    assert 'class="mail-preview-details"' in response.text
+    assert "展开完整邮件内容" in response.text
+
+
+
 def test_build_preview_removes_email_html_css_noise() -> None:
     preview = _build_preview(
         "",
