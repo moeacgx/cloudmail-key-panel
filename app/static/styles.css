@@ -170,6 +170,29 @@ button,
   margin: 8px 0;
 }
 
+.mail-meta-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  margin: 12px 0 4px;
+}
+
+.mail-meta-item {
+  display: grid;
+  gap: 4px;
+}
+
+.mail-meta-label {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.mail-meta-value {
+  margin: 0;
+  word-break: break-word;
+}
+
 .code-list {
   display: flex;
   gap: 10px;

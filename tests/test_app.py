@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app.cloudmail import CloudMailMessage
-from app.main import create_app
+from app.main import _build_preview, create_app
 from app.settings import AppSettings
 
 
@@ -123,6 +123,9 @@ def test_admin_can_create_mapping_and_public_lookup_shows_recent_codes(tmp_path)
     assert "330119" in lookup_response.text
     assert "noreply@tm.openai.com" in lookup_response.text
     assert "cranes_solute.1o@icloud.com" in lookup_response.text
+    assert "CloudMail 查询邮箱" not in lookup_response.text
+    assert "发件人" in lookup_response.text
+    assert "收件人" in lookup_response.text
     assert fake_cloudmail.calls == [("cranes_solute.1o@icloud.com", 5)]
 
 
@@ -300,6 +303,37 @@ def test_admin_can_edit_and_delete_key(tmp_path) -> None:
 
     missing_lookup = client.get("/mailbox/buyer-key-2")
     assert missing_lookup.status_code == 404
+
+
+def test_build_preview_removes_email_html_css_noise() -> None:
+    preview = _build_preview(
+        "",
+        """
+        <style>
+          @font-face { font-family: \"Söhne\"; }
+          .ExternalClass { width: 100%; }
+        </style>
+        <div>输入此临时验证码可以继续：138959</div>
+        <div>如果并非你本人尝试创建 ChatGPT 帐户，请忽略此电子邮件。</div>
+        """,
+    )
+
+    assert "138959" in preview
+    assert "输入此临时验证码可以继续" in preview
+    assert "@font-face" not in preview
+    assert ".ExternalClass" not in preview
+
+
+def test_build_preview_prefers_clean_html_over_textual_html_source() -> None:
+    preview = _build_preview(
+        "你的 ChatGPT 代码为 138959\n@font-face { font-family: Söhne; }\n.ExternalClass { width: 100%; }",
+        "<div>你的 ChatGPT 代码为 138959</div><div>输入此临时验证码可以继续：138959</div>",
+    )
+
+    assert "你的 ChatGPT 代码为 138959" in preview
+    assert "输入此临时验证码可以继续：138959" in preview
+    assert "@font-face" not in preview
+    assert ".ExternalClass" not in preview
 
 
 def test_mailbox_filters_shared_query_mailbox_by_detected_original_recipient(tmp_path) -> None:

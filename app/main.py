@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import html
 import json
 import re
 from dataclasses import dataclass
@@ -20,6 +21,23 @@ from app.store import CloudMailSettingsRecord, KeyStore
 
 _TAG_PATTERN = re.compile(r"<[^>]+>")
 _WHITESPACE_PATTERN = re.compile(r"\s+")
+_HTML_LINE_BREAK_PATTERN = re.compile(r"<(?:br|/p|/div|/li|/tr|/td|/th|/h[1-6]|/section|/article|/header|/footer)\b[^>]*>", re.IGNORECASE)
+_HTML_BLOCK_PATTERN = re.compile(r"<(?:p|div|li|tr|td|th|h[1-6]|section|article|header|footer)\b[^>]*>", re.IGNORECASE)
+_HTML_STYLE_SCRIPT_PATTERN = re.compile(r"<(style|script)[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
+_HTML_COMMENT_PATTERN = re.compile(r"<!--.*?-->", re.DOTALL)
+_HTML_SOURCE_HINTS = (
+    "@font-face",
+    ".externalclass",
+    "font-family:",
+    "border-collapse:",
+    "mso-",
+    "-webkit-text-size-adjust",
+    "-ms-text-size-adjust",
+    "<style",
+    "</style",
+    "<table",
+    "<div",
+)
 _EMAIL_PATTERN = r"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}"
 _ORIGINAL_RECIPIENT_PATTERNS = [
     re.compile(
@@ -352,11 +370,47 @@ def _is_admin(request: Request) -> bool:
 
 
 def _build_preview(text_value: str, html_value: str) -> str:
-    text = (text_value or "").strip()
-    if text:
-        return text
-    stripped = _TAG_PATTERN.sub(" ", html_value or "")
-    return _WHITESPACE_PATTERN.sub(" ", stripped).strip()
+    normalized_text = _normalize_plain_preview(text_value)
+    normalized_html = _normalize_html_preview(html_value)
+
+    if normalized_text and not _looks_like_html_source(text_value):
+        return normalized_text
+    if normalized_html:
+        return normalized_html
+    return normalized_text
+
+
+def _normalize_plain_preview(value: str) -> str:
+    if not value:
+        return ""
+
+    normalized = html.unescape(value).replace("\r\n", "\n").replace("\r", "\n")
+    normalized = re.sub(r"[ \t\f\v]+", " ", normalized)
+    normalized = re.sub(r"\n[ \t]+", "\n", normalized)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    return normalized.strip()
+
+
+def _normalize_html_preview(value: str) -> str:
+    if not value:
+        return ""
+
+    normalized = html.unescape(value)
+    normalized = _HTML_COMMENT_PATTERN.sub(" ", normalized)
+    normalized = _HTML_STYLE_SCRIPT_PATTERN.sub(" ", normalized)
+    normalized = _HTML_LINE_BREAK_PATTERN.sub("\n", normalized)
+    normalized = _HTML_BLOCK_PATTERN.sub("\n", normalized)
+    normalized = _TAG_PATTERN.sub(" ", normalized)
+    normalized = normalized.replace("\xa0", " ")
+    return _normalize_plain_preview(normalized)
+
+
+def _looks_like_html_source(value: str) -> bool:
+    if not value:
+        return False
+
+    normalized = html.unescape(value).lower()
+    return any(marker in normalized for marker in _HTML_SOURCE_HINTS)
 
 
 def _filter_emails_for_mapping(
