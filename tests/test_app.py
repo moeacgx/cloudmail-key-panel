@@ -164,6 +164,7 @@ def test_admin_can_save_cloudmail_settings_and_lookup_uses_saved_token(tmp_path)
             "internal_admin_password": "secret",
             "default_query_email": "openai@eve.ink",
             "recent_email_limit": "3",
+            "display_timezone": "Asia/Shanghai",
         },
         follow_redirects=True,
     )
@@ -174,9 +175,11 @@ def test_admin_can_save_cloudmail_settings_and_lookup_uses_saved_token(tmp_path)
     assert 'name="query_email" value="openai@eve.ink"' in save_response.text
     assert 'name="internal_admin_email" value="admin@example.com"' in save_response.text
     assert 'name="recent_email_limit" min="1" step="1" value="3"' in save_response.text
+    assert 'name="display_timezone" value="Asia/Shanghai"' in save_response.text
     assert 'id="cloudmail-config-dialog"' in save_response.text
     assert 'data-cloudmail-config-trigger' in save_response.text
     assert "编辑 CloudMail 配置" in save_response.text
+    assert "系统时区" in save_response.text
 
     client.post(
         "/admin/keys",
@@ -601,6 +604,57 @@ def test_mailbox_supports_live_fragment_refresh_without_full_page_reload(tmp_pat
     assert "新验证码 222222" in fragment_response.text
     assert "222222" in fragment_response.text
     assert "旧验证码 111111" not in fragment_response.text
+
+
+
+def test_mailbox_uses_configured_timezone_for_displayed_email_time(tmp_path) -> None:
+    fake_cloudmail = FakeCloudMailClient(
+        messages=[
+            CloudMailMessage(
+                email_id=1,
+                send_email="noreply@tm.openai.com",
+                send_name="OpenAI",
+                subject="你的临时 ChatGPT 登录代码",
+                to_email="buyer@example.com",
+                to_name="",
+                create_time="2026-04-18 10:56:53",
+                type=0,
+                content="<div>299929</div>",
+                text="299929",
+                is_del=0,
+            )
+        ]
+    )
+    settings = AppSettings(
+        app_secret_key="test-secret",
+        app_admin_username="admin",
+        app_admin_password="pass123",
+        database_path=str(tmp_path / "app.db"),
+        cloudmail_base_url="https://mail.example.com",
+        cloudmail_admin_email="admin@example.com",
+        cloudmail_admin_password="secret",
+        lookup_email_limit=5,
+    )
+    store = KeyStore(tmp_path / "app.db")
+    store.save_cloudmail_settings(
+        base_url="https://mail.example.com",
+        api_token="fixed-token",
+        display_timezone="Asia/Shanghai",
+    )
+    store.create_mapping(
+        recipient_email="buyer@example.com",
+        query_email="buyer@example.com",
+        access_key="tz-key",
+        label="demo",
+    )
+    app = create_app(settings=settings, store=store, cloudmail_client=fake_cloudmail)
+    client = TestClient(app)
+
+    response = client.get("/mailbox/tz-key")
+
+    assert response.status_code == 200
+    assert "2026-04-18 18:56:53" in response.text
+    assert "2026-04-18 10:56:53" not in response.text
 
 
 

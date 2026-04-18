@@ -10,7 +10,7 @@
     <a class="button secondary" href="/">重新输入 Key</a>
   </div>
 
-  <p class="mail-refresh-hint">页面会自动获取新邮件，无需手动刷新。</p>
+  <p class="mail-refresh-hint">页面会自动获取新邮件，无需手动刷新。当前按 {{ display_timezone }} 显示时间。</p>
 
   {% if notice %}
     <div class="alert">{{ notice }}</div>
@@ -22,7 +22,7 @@
         <article class="mail-card">
           <div class="mail-topline">
             <h3>{{ item.message.subject or '无主题' }}</h3>
-            <span>{{ item.message.create_time }}</span>
+            <span>{{ item.display_create_time }}</span>
           </div>
           <div class="mail-meta-grid">
             <div class="mail-meta-item">

@@ -40,6 +40,10 @@
       <span class="mapping-field-label">最近拉取邮件数</span>
       <span>{{ cloudmail_config.recent_email_limit }}</span>
     </div>
+    <div class="mapping-field">
+      <span class="mapping-field-label">系统时区</span>
+      <span>{{ cloudmail_config.display_timezone }}</span>
+    </div>
   </div>
 
   <div class="action-row top-gap">
@@ -81,6 +85,10 @@
       <label>
         <span>实时拉取最近几封邮件</span>
         <input type="number" name="recent_email_limit" min="1" step="1" value="{{ cloudmail_config.recent_email_limit }}" placeholder="例如：3" required>
+      </label>
+      <label>
+        <span>系统时区</span>
+        <input type="text" name="display_timezone" value="{{ cloudmail_config.display_timezone }}" placeholder="例如：Asia/Shanghai / UTC / Europe/Berlin" required>
       </label>
       <div class="action-row">
         <button type="submit">保存 CloudMail 配置</button>

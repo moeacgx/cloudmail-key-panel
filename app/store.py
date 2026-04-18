@@ -5,6 +5,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 @dataclass(slots=True)
@@ -26,6 +27,7 @@ class CloudMailSettingsRecord:
     internal_admin_password: str
     default_query_email: str
     recent_email_limit: int
+    display_timezone: str
     updated_at: str
 
 
@@ -223,12 +225,14 @@ class KeyStore:
         internal_admin_password: str = "",
         default_query_email: str = "",
         recent_email_limit: int | str = 10,
+        display_timezone: str = "UTC",
     ) -> CloudMailSettingsRecord:
         normalized_base_url = base_url.strip()
         normalized_api_token = api_token.strip()
         normalized_internal_admin_email = internal_admin_email.strip().lower()
         normalized_internal_admin_password = internal_admin_password.strip()
         normalized_default_query_email = default_query_email.strip().lower()
+        normalized_display_timezone = self._normalize_display_timezone(display_timezone)
 
         if not normalized_base_url:
             raise ValueError("base_url is required")
@@ -254,6 +258,7 @@ class KeyStore:
                     ("cloudmail_internal_admin_password", normalized_internal_admin_password, updated_at),
                     ("default_query_email", normalized_default_query_email, updated_at),
                     ("recent_email_limit", str(normalized_recent_email_limit), updated_at),
+                    ("display_timezone", normalized_display_timezone, updated_at),
                 ],
             )
             connection.commit()
@@ -265,6 +270,7 @@ class KeyStore:
             internal_admin_password=normalized_internal_admin_password,
             default_query_email=normalized_default_query_email,
             recent_email_limit=normalized_recent_email_limit,
+            display_timezone=normalized_display_timezone,
             updated_at=updated_at,
         )
 
@@ -276,10 +282,11 @@ class KeyStore:
         default_internal_admin_password: str = "",
         default_query_email: str = "",
         default_recent_email_limit: int = 10,
+        default_display_timezone: str = "UTC",
     ) -> CloudMailSettingsRecord:
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT key, value, updated_at FROM app_settings WHERE key IN ('cloudmail_base_url', 'cloudmail_api_token', 'cloudmail_internal_admin_email', 'cloudmail_internal_admin_password', 'default_query_email', 'recent_email_limit')"
+                "SELECT key, value, updated_at FROM app_settings WHERE key IN ('cloudmail_base_url', 'cloudmail_api_token', 'cloudmail_internal_admin_email', 'cloudmail_internal_admin_password', 'default_query_email', 'recent_email_limit', 'display_timezone')"
             ).fetchall()
 
         values = {
@@ -289,6 +296,7 @@ class KeyStore:
             "cloudmail_internal_admin_password": default_internal_admin_password,
             "default_query_email": default_query_email,
             "recent_email_limit": str(default_recent_email_limit),
+            "display_timezone": default_display_timezone,
         }
         updated_at = ""
 
@@ -303,6 +311,7 @@ class KeyStore:
             internal_admin_password=values["cloudmail_internal_admin_password"],
             default_query_email=values["default_query_email"],
             recent_email_limit=self._normalize_recent_email_limit(values["recent_email_limit"]),
+            display_timezone=self._normalize_display_timezone(values["display_timezone"]),
             updated_at=updated_at,
         )
 
@@ -382,6 +391,15 @@ class KeyStore:
             raise ValueError("recent_email_limit must be a positive integer") from exc
         if normalized <= 0:
             raise ValueError("recent_email_limit must be a positive integer")
+        return normalized
+
+    @staticmethod
+    def _normalize_display_timezone(value: str) -> str:
+        normalized = (value or "UTC").strip() or "UTC"
+        try:
+            ZoneInfo(normalized)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError("display_timezone is invalid") from exc
         return normalized
 
     @staticmethod

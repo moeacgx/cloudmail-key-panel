@@ -20,6 +20,7 @@ class AppSettings:
     cloudmail_internal_admin_password: str = ""
     cloudmail_api_token: str | None = None
     lookup_email_limit: int = 10
+    display_timezone: str = "UTC"
 
     @classmethod
     def from_env(cls) -> "AppSettings":
@@ -38,4 +39,5 @@ class AppSettings:
             cloudmail_internal_admin_password=os.getenv("CLOUDMAIL_INTERNAL_ADMIN_PASSWORD", defaults.cloudmail_internal_admin_password),
             cloudmail_api_token=os.getenv("CLOUDMAIL_API_TOKEN") or None,
             lookup_email_limit=int(os.getenv("LOOKUP_EMAIL_LIMIT", str(defaults.lookup_email_limit))),
+            display_timezone=os.getenv("APP_DISPLAY_TIMEZONE", defaults.display_timezone),
         )

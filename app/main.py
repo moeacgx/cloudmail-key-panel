@@ -5,8 +5,10 @@ import html
 import json
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import FastAPI, Form, Request, Response, status
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -150,6 +152,7 @@ def create_app(
         internal_admin_password: str = Form(""),
         default_query_email: str = Form(""),
         recent_email_limit: str = Form(...),
+        display_timezone: str = Form("UTC"),
         q: str = Form(""),
         category: str = Form(""),
         page: int = Form(1),
@@ -165,6 +168,7 @@ def create_app(
                 internal_admin_password=internal_admin_password,
                 default_query_email=default_query_email,
                 recent_email_limit=recent_email_limit,
+                display_timezone=display_timezone,
             )
         except ValueError as exc:
             return _render_admin_dashboard(
@@ -355,12 +359,14 @@ def _build_mailbox_context(request: Request, access_key: str) -> tuple[dict[str,
         }, status.HTTP_502_BAD_GATEWAY
 
     filtered_emails, notice = _filter_emails_for_mapping(mapping.recipient_email, mapping.query_email, emails)
+    display_timezone = cloudmail_settings.display_timezone
     rendered_emails = [
         {
             "message": email,
             "codes": extract_verification_codes(email.subject, email.text, email.content),
             "preview": _build_preview(email.text, email.content),
             "detected_recipients": detected_recipients,
+            "display_create_time": _format_timestamp_for_display(email.create_time, display_timezone),
         }
         for email, detected_recipients in filtered_emails
     ]
@@ -369,6 +375,7 @@ def _build_mailbox_context(request: Request, access_key: str) -> tuple[dict[str,
         "emails": rendered_emails,
         "error": None,
         "notice": notice,
+        "display_timezone": display_timezone,
     }, status.HTTP_200_OK
 
 
@@ -397,11 +404,23 @@ def _render_admin_dashboard(
     )
     categories = request.app.state.store.list_categories()
     cloudmail_config = _get_cloudmail_settings_for_display(request)
+    display_mappings = [
+        {
+            "id": mapping.id,
+            "recipient_email": mapping.recipient_email,
+            "query_email": mapping.query_email,
+            "access_key": mapping.access_key,
+            "label": mapping.label,
+            "category": mapping.category,
+            "created_at": _format_timestamp_for_display(mapping.created_at, cloudmail_config.display_timezone),
+        }
+        for mapping in mappings
+    ]
     return _render(
         request,
         "admin_dashboard.html",
         {
-            "mappings": mappings,
+            "mappings": display_mappings,
             "categories": categories,
             "cloudmail_config": cloudmail_config,
             "error": error,
@@ -428,6 +447,7 @@ def _get_cloudmail_settings_for_display(request: Request) -> CloudMailSettingsRe
         default_internal_admin_email=settings.cloudmail_internal_admin_email,
         default_internal_admin_password=settings.cloudmail_internal_admin_password,
         default_recent_email_limit=settings.lookup_email_limit,
+        default_display_timezone=settings.display_timezone,
     )
 
 
@@ -473,6 +493,15 @@ def _parse_recipient_emails(raw_value: str) -> list[str]:
     return candidates
 
 
+def _format_timestamp_for_display(value: str, timezone_name: str) -> str:
+    try:
+        parsed = datetime.strptime((value or "").strip(), "%Y-%m-%d %H:%M:%S")
+        parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(ZoneInfo(timezone_name)).strftime("%Y-%m-%d %H:%M:%S")
+    except (ValueError, ZoneInfoNotFoundError):
+        return value
+
+
 def _get_cloudmail_client(request: Request) -> Any:
     if request.app.state.fixed_cloudmail_client is not None:
         return request.app.state.fixed_cloudmail_client
@@ -511,6 +540,7 @@ def _translate_store_error(message: str) -> str:
         "cloudmail_auth is required": "固定 Token 和管理员邮箱密码至少填一种",
         "internal_admin_credentials incomplete": "管理员邮箱和密码要么都填，要么都留空",
         "recent_email_limit must be a positive integer": "最新邮件数量必须是大于 0 的整数",
+        "display_timezone is invalid": "系统时区无效，请填写正确的 IANA 时区，例如 Asia/Shanghai",
     }
     return mapping.get(message, message)
 
