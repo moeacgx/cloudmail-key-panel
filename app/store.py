@@ -145,13 +145,46 @@ class KeyStore:
 
         return self._row_to_mapping(row)
 
-    def list_mappings(self) -> list[AccessMapping]:
+    def list_mappings(
+        self,
+        search_query: str = "",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[AccessMapping]:
+        where_clause, params = self._build_mapping_search(search_query)
+        query = "SELECT id, recipient_email, query_email, access_key, label, created_at FROM access_mappings"
+        if where_clause:
+            query = f"{query} WHERE {where_clause}"
+        query = f"{query} ORDER BY id DESC"
+        if limit is not None:
+            query = f"{query} LIMIT ? OFFSET ?"
+            params.extend([max(int(limit), 1), max(int(offset), 0)])
+
         with self._connect() as connection:
-            rows = connection.execute(
-                "SELECT id, recipient_email, query_email, access_key, label, created_at FROM access_mappings ORDER BY id DESC"
-            ).fetchall()
+            rows = connection.execute(query, tuple(params)).fetchall()
 
         return [mapping for row in rows if (mapping := self._row_to_mapping(row)) is not None]
+
+    def count_mappings(self, search_query: str = "") -> int:
+        where_clause, params = self._build_mapping_search(search_query)
+        query = "SELECT COUNT(*) FROM access_mappings"
+        if where_clause:
+            query = f"{query} WHERE {where_clause}"
+
+        with self._connect() as connection:
+            return int(connection.execute(query, tuple(params)).fetchone()[0])
+
+    def delete_mappings(self, mapping_ids: list[int]) -> int:
+        normalized_ids = sorted({int(mapping_id) for mapping_id in mapping_ids})
+        if not normalized_ids:
+            raise ValueError("mapping_ids is required")
+
+        placeholders = ", ".join("?" for _ in normalized_ids)
+        with self._connect() as connection:
+            cursor = connection.execute(f"DELETE FROM access_mappings WHERE id IN ({placeholders})", tuple(normalized_ids))
+            connection.commit()
+
+        return int(cursor.rowcount)
 
     def save_cloudmail_settings(
         self,
@@ -284,6 +317,19 @@ class KeyStore:
         connection = sqlite3.connect(self.db_path)
         connection.row_factory = sqlite3.Row
         return connection
+
+    @staticmethod
+    def _build_mapping_search(search_query: str) -> tuple[str, list[str]]:
+        normalized_query = search_query.strip().lower()
+        if not normalized_query:
+            return "", []
+
+        wildcard = f"%{normalized_query}%"
+        clause = " OR ".join(
+            f"LOWER({column}) LIKE ?"
+            for column in ("recipient_email", "query_email", "access_key", "label")
+        )
+        return clause, [wildcard, wildcard, wildcard, wildcard]
 
     @staticmethod
     def _normalize_recent_email_limit(value: int | str) -> int:

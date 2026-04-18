@@ -67,6 +67,12 @@ button:hover,
   background: var(--primary-dark);
 }
 
+button:disabled,
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .card {
   background: var(--card);
   border: 1px solid var(--border);
@@ -283,8 +289,60 @@ button,
   align-items: center;
 }
 
+.top-gap {
+  margin-top: 16px;
+}
+
 .inline-form {
   margin: 0;
+}
+
+.admin-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.toolbar-search {
+  flex: 1 1 320px;
+}
+
+.toolbar-row {
+  justify-content: space-between;
+}
+
+.selection-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.selection-toggle input {
+  width: auto;
+  margin: 0;
+}
+
+.compact-selection-row {
+  justify-content: flex-end;
+}
+
+.pagination-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.pagination-status {
+  color: var(--muted);
+  font-weight: 600;
 }
 
 .mapping-dialog {

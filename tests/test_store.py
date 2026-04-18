@@ -72,6 +72,51 @@ def test_key_store_updates_and_deletes_mapping(tmp_path) -> None:
     assert store.get_by_key("buyer-key-2") is None
 
 
+def test_key_store_supports_search_pagination_and_batch_delete(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+
+    alpha_key = store.create_mapping(
+        recipient_email="alpha@example.com",
+        query_email="openai@eve.ink",
+        access_key="alpha-key-1",
+        label="starter",
+    )
+    beta_key = store.create_mapping(
+        recipient_email="beta@example.com",
+        query_email="openai@eve.ink",
+        access_key="beta-key-1",
+        label="alpha label",
+    )
+    gamma_key = store.create_mapping(
+        recipient_email="gamma@example.com",
+        query_email="alpha@eve.ink",
+        access_key="gamma-key-1",
+        label="normal",
+    )
+    store.create_mapping(
+        recipient_email="delta@example.com",
+        query_email="mail@eve.ink",
+        access_key="delta-key-1",
+        label="normal",
+    )
+
+    page_one = store.list_mappings(search_query="alpha", limit=2, offset=0)
+    page_two = store.list_mappings(search_query="alpha", limit=2, offset=2)
+    total = store.count_mappings(search_query="alpha")
+
+    assert total == 3
+    assert [item.access_key for item in page_one] == ["gamma-key-1", "beta-key-1"]
+    assert [item.access_key for item in page_two] == ["alpha-key-1"]
+
+    deleted = store.delete_mappings([alpha_key.id, gamma_key.id])
+
+    assert deleted == 2
+    assert store.get_by_key("alpha-key-1") is None
+    assert store.get_by_key("gamma-key-1") is None
+    assert store.get_by_key(beta_key.access_key) is not None
+
+
+
 def test_key_store_persists_cloudmail_settings(tmp_path) -> None:
     store = KeyStore(tmp_path / "app.db")
 

@@ -4,8 +4,8 @@
 <section class="card">
   <div class="mailbox-header">
     <div>
-      <h2>CloudMail 配置</h2>
-      <p>这里可以同时保存 public Token 和 CloudMail 管理员账号。填了管理员邮箱+密码后，面板会优先走内部接口读取 recipient 字段，才能真正按原始收件人精确筛选。</p>
+      <h2>后台管理</h2>
+      <p>这里可以管理 CloudMail 配置、生成查看 Key，并按原始收件人邮箱给买家提供查询入口。</p>
     </div>
     <form method="post" action="/admin/logout">
       <button type="submit" class="secondary">退出登录</button>
@@ -19,33 +19,74 @@
     <div class="alert success">{{ message }}</div>
   {% endif %}
 
-  <form method="post" action="/admin/cloudmail" class="stack-form">
-    <label>
-      <span>CloudMail 地址</span>
-      <input type="url" name="base_url" value="{{ cloudmail_config.base_url }}" placeholder="https://mail.boxmoe.eu.org/" required>
-    </label>
-    <label>
-      <span>固定 Token（可选）</span>
-      <input type="text" name="api_token" value="{{ cloudmail_config.api_token }}" placeholder="继续使用 public /api/public/emailList 时填写">
-    </label>
-    <label>
-      <span>CloudMail 管理员邮箱（可选）</span>
-      <input type="email" name="internal_admin_email" value="{{ cloudmail_config.internal_admin_email }}" placeholder="填写后优先走内部 /api/login + /api/allEmail/list">
-    </label>
-    <label>
-      <span>CloudMail 管理员密码（可选）</span>
-      <input type="password" name="internal_admin_password" value="{{ cloudmail_config.internal_admin_password }}" placeholder="和管理员邮箱一起填写">
-    </label>
-    <label>
-      <span>默认 CloudMail 查询邮箱（可选）</span>
-      <input type="email" name="default_query_email" value="{{ cloudmail_config.default_query_email }}" placeholder="例如：openai@eve.ink">
-    </label>
-    <label>
-      <span>实时拉取最近几封邮件</span>
-      <input type="number" name="recent_email_limit" min="1" step="1" value="{{ cloudmail_config.recent_email_limit }}" placeholder="例如：3" required>
-    </label>
-    <button type="submit">保存 CloudMail 配置</button>
-  </form>
+  <div class="mapping-summary-grid">
+    <div class="mapping-field">
+      <span class="mapping-field-label">CloudMail 地址</span>
+      <strong>{{ cloudmail_config.base_url or '未填写' }}</strong>
+    </div>
+    <div class="mapping-field">
+      <span class="mapping-field-label">固定 Token</span>
+      <span>{{ '已配置' if cloudmail_config.api_token else '未配置' }}</span>
+    </div>
+    <div class="mapping-field">
+      <span class="mapping-field-label">内部管理员模式</span>
+      <span>{{ '已配置' if cloudmail_config.internal_admin_email and cloudmail_config.internal_admin_password else '未配置' }}</span>
+    </div>
+    <div class="mapping-field">
+      <span class="mapping-field-label">默认查询邮箱</span>
+      <span>{{ cloudmail_config.default_query_email or '未设置' }}</span>
+    </div>
+    <div class="mapping-field">
+      <span class="mapping-field-label">最近拉取邮件数</span>
+      <span>{{ cloudmail_config.recent_email_limit }}</span>
+    </div>
+  </div>
+
+  <div class="action-row top-gap">
+    <button type="button" class="secondary" data-cloudmail-config-trigger>编辑 CloudMail 配置</button>
+  </div>
+
+  <dialog id="cloudmail-config-dialog" class="mapping-dialog">
+    <div class="dialog-header">
+      <div>
+        <h3>编辑 CloudMail 配置</h3>
+        <p>配置放进弹窗里，平时不用一直占着页面空间。</p>
+      </div>
+      <button type="button" class="secondary" data-close-dialog>关闭</button>
+    </div>
+    <form method="post" action="/admin/cloudmail" class="stack-form">
+      <input type="hidden" name="q" value="{{ search_query }}">
+      <input type="hidden" name="page" value="{{ current_page }}">
+      <label>
+        <span>CloudMail 地址</span>
+        <input type="url" name="base_url" value="{{ cloudmail_config.base_url }}" placeholder="https://mail.boxmoe.eu.org/" required>
+      </label>
+      <label>
+        <span>固定 Token（可选）</span>
+        <input type="text" name="api_token" value="{{ cloudmail_config.api_token }}" placeholder="继续使用 public /api/public/emailList 时填写">
+      </label>
+      <label>
+        <span>CloudMail 管理员邮箱（可选）</span>
+        <input type="email" name="internal_admin_email" value="{{ cloudmail_config.internal_admin_email }}" placeholder="填写后优先走内部 /api/login + /api/allEmail/list">
+      </label>
+      <label>
+        <span>CloudMail 管理员密码（可选）</span>
+        <input type="password" name="internal_admin_password" value="{{ cloudmail_config.internal_admin_password }}" placeholder="和管理员邮箱一起填写">
+      </label>
+      <label>
+        <span>默认 CloudMail 查询邮箱（可选）</span>
+        <input type="email" name="default_query_email" value="{{ cloudmail_config.default_query_email }}" placeholder="例如：openai@eve.ink">
+      </label>
+      <label>
+        <span>实时拉取最近几封邮件</span>
+        <input type="number" name="recent_email_limit" min="1" step="1" value="{{ cloudmail_config.recent_email_limit }}" placeholder="例如：3" required>
+      </label>
+      <div class="action-row">
+        <button type="submit">保存 CloudMail 配置</button>
+        <button type="button" class="secondary" data-close-dialog>取消</button>
+      </div>
+    </form>
+  </dialog>
 </section>
 
 <section class="card">
@@ -78,52 +119,105 @@
 </section>
 
 <section class="card">
-  <h2>已创建的 Key</h2>
-  {% if mappings %}
-    <div class="mapping-list">
-      {% for item in mappings %}
-        <article class="mapping-card compact-mapping-card">
-          <div class="mapping-summary-grid">
-            <div class="mapping-field">
-              <span class="mapping-field-label">原始收件人邮箱</span>
-              <strong>{{ item.recipient_email }}</strong>
-            </div>
-            <div class="mapping-field">
-              <span class="mapping-field-label">CloudMail 查询邮箱</span>
-              <code>{{ item.query_email }}</code>
-            </div>
-            <div class="mapping-field">
-              <span class="mapping-field-label">查看 Key</span>
-              <code>{{ item.access_key }}</code>
-            </div>
-            <div class="mapping-field">
-              <span class="mapping-field-label">备注</span>
-              <span>{{ item.label or '—' }}</span>
-            </div>
-          </div>
-          <div class="mapping-meta">
-            <span>ID：{{ item.id }}</span>
-            <span>创建时间：{{ item.created_at }}</span>
-          </div>
-          <div class="action-row">
-            <a class="button secondary" href="/mailbox/{{ item.access_key }}" target="_blank">打开前台</a>
-            <button
-              type="button"
-              class="secondary"
-              data-edit-key-trigger
-              data-id="{{ item.id }}"
-              data-recipient-email="{{ item.recipient_email }}"
-              data-query-email="{{ item.query_email }}"
-              data-access-key="{{ item.access_key }}"
-              data-label="{{ item.label }}"
-            >编辑这个 Key</button>
-            <form method="post" action="/admin/keys/{{ item.id }}/delete" class="inline-form">
-              <button type="submit" class="danger">删除这个 Key</button>
-            </form>
-          </div>
-        </article>
-      {% endfor %}
+  <div class="mailbox-header">
+    <div>
+      <h2>已创建的 Key</h2>
+      <p>当前共 {{ total_mappings }} 个 Key，可搜索、翻页、批量删除。</p>
     </div>
+  </div>
+
+  <form method="get" action="/admin" class="admin-toolbar">
+    <label class="toolbar-search">
+      <span>搜索 Key / 收件人 / 查询邮箱 / 备注</span>
+      <input type="text" name="q" value="{{ search_query }}" placeholder="输入关键词筛选">
+    </label>
+    <div class="action-row">
+      <button type="submit">搜索</button>
+      {% if search_query %}
+        <a class="button secondary" href="/admin">清空筛选</a>
+      {% endif %}
+    </div>
+  </form>
+
+  {% if mappings %}
+    <form method="post" action="/admin/keys/batch-delete" class="stack-form">
+      <input type="hidden" name="q" value="{{ search_query }}">
+      <input type="hidden" name="page" value="{{ current_page }}">
+
+      <div class="action-row toolbar-row">
+        <label class="selection-toggle">
+          <input type="checkbox" data-select-all>
+          <span>全选本页</span>
+        </label>
+        <button type="submit" class="danger">批量删除选中</button>
+        <span class="meta">第 {{ current_page }} / {{ total_pages }} 页</span>
+      </div>
+
+      <div class="mapping-list">
+        {% for item in mappings %}
+          <article class="mapping-card compact-mapping-card">
+            <div class="action-row compact-selection-row">
+              <label class="selection-toggle">
+                <input type="checkbox" name="mapping_ids" value="{{ item.id }}" data-row-selector>
+                <span>选中这个 Key</span>
+              </label>
+            </div>
+            <div class="mapping-summary-grid">
+              <div class="mapping-field">
+                <span class="mapping-field-label">原始收件人邮箱</span>
+                <strong>{{ item.recipient_email }}</strong>
+              </div>
+              <div class="mapping-field">
+                <span class="mapping-field-label">CloudMail 查询邮箱</span>
+                <code>{{ item.query_email }}</code>
+              </div>
+              <div class="mapping-field">
+                <span class="mapping-field-label">查看 Key</span>
+                <code>{{ item.access_key }}</code>
+              </div>
+              <div class="mapping-field">
+                <span class="mapping-field-label">备注</span>
+                <span>{{ item.label or '—' }}</span>
+              </div>
+            </div>
+            <div class="mapping-meta">
+              <span>ID：{{ item.id }}</span>
+              <span>创建时间：{{ item.created_at }}</span>
+            </div>
+            <div class="action-row">
+              <a class="button secondary" href="/mailbox/{{ item.access_key }}" target="_blank">打开前台</a>
+              <button
+                type="button"
+                class="secondary"
+                data-edit-key-trigger
+                data-id="{{ item.id }}"
+                data-recipient-email="{{ item.recipient_email }}"
+                data-query-email="{{ item.query_email }}"
+                data-access-key="{{ item.access_key }}"
+                data-label="{{ item.label }}"
+              >编辑这个 Key</button>
+              <button type="submit" formaction="/admin/keys/{{ item.id }}/delete" class="danger" formnovalidate>删除这个 Key</button>
+            </div>
+          </article>
+        {% endfor %}
+      </div>
+    </form>
+
+    {% if total_pages > 1 %}
+      <div class="pagination-row">
+        <form method="get" action="/admin" class="inline-form">
+          <input type="hidden" name="q" value="{{ search_query }}">
+          <input type="hidden" name="page" value="{{ previous_page }}">
+          <button type="submit" class="secondary" {% if not has_previous_page %}disabled{% endif %}>上一页</button>
+        </form>
+        <span class="pagination-status">第 {{ current_page }} / {{ total_pages }} 页</span>
+        <form method="get" action="/admin" class="inline-form">
+          <input type="hidden" name="q" value="{{ search_query }}">
+          <input type="hidden" name="page" value="{{ next_page }}">
+          <button type="submit" class="secondary" {% if not has_next_page %}disabled{% endif %}>下一页</button>
+        </form>
+      </div>
+    {% endif %}
 
     <dialog id="mapping-edit-dialog" class="mapping-dialog">
       <div class="dialog-header">
@@ -134,6 +228,8 @@
         <button type="button" class="secondary" data-close-dialog>关闭</button>
       </div>
       <form id="mapping-edit-form" method="post" class="stack-form">
+        <input type="hidden" name="q" value="{{ search_query }}">
+        <input type="hidden" name="page" value="{{ current_page }}">
         <div class="mapping-grid">
           <label>
             <span>原始收件人邮箱</span>
@@ -159,35 +255,52 @@
       </form>
     </dialog>
 
-    <script>
-      (() => {
-        const dialog = document.getElementById('mapping-edit-dialog');
-        const form = document.getElementById('mapping-edit-form');
-        if (!dialog || !form) return;
-
-        const recipientInput = document.getElementById('edit-recipient-email');
-        const queryInput = document.getElementById('edit-query-email');
-        const keyInput = document.getElementById('edit-access-key');
-        const labelInput = document.getElementById('edit-label');
-
-        document.querySelectorAll('[data-edit-key-trigger]').forEach((button) => {
-          button.addEventListener('click', () => {
-            form.action = `/admin/keys/${button.dataset.id}/update`;
-            recipientInput.value = button.dataset.recipientEmail || '';
-            queryInput.value = button.dataset.queryEmail || '';
-            keyInput.value = button.dataset.accessKey || '';
-            labelInput.value = button.dataset.label || '';
-            dialog.showModal();
-          });
-        });
-
-        dialog.querySelectorAll('[data-close-dialog]').forEach((button) => {
-          button.addEventListener('click', () => dialog.close());
-        });
-      })();
-    </script>
   {% else %}
-    <div class="alert">暂时还没有 Key。</div>
+    <div class="alert">{{ '没有匹配到任何 Key。' if search_query else '暂时还没有 Key。' }}</div>
   {% endif %}
 </section>
+
+<script>
+  (() => {
+    const cloudmailDialog = document.getElementById('cloudmail-config-dialog');
+    const mappingDialog = document.getElementById('mapping-edit-dialog');
+    const mappingForm = document.getElementById('mapping-edit-form');
+
+    document.querySelectorAll('[data-cloudmail-config-trigger]').forEach((button) => {
+      button.addEventListener('click', () => cloudmailDialog?.showModal());
+    });
+
+    if (mappingDialog && mappingForm) {
+      const recipientInput = document.getElementById('edit-recipient-email');
+      const queryInput = document.getElementById('edit-query-email');
+      const keyInput = document.getElementById('edit-access-key');
+      const labelInput = document.getElementById('edit-label');
+
+      document.querySelectorAll('[data-edit-key-trigger]').forEach((button) => {
+        button.addEventListener('click', () => {
+          mappingForm.action = `/admin/keys/${button.dataset.id}/update`;
+          recipientInput.value = button.dataset.recipientEmail || '';
+          queryInput.value = button.dataset.queryEmail || '';
+          keyInput.value = button.dataset.accessKey || '';
+          labelInput.value = button.dataset.label || '';
+          mappingDialog.showModal();
+        });
+      });
+    }
+
+    document.querySelectorAll('dialog [data-close-dialog]').forEach((button) => {
+      button.addEventListener('click', () => button.closest('dialog')?.close());
+    });
+
+    const selectAll = document.querySelector('[data-select-all]');
+    const rowSelectors = Array.from(document.querySelectorAll('[data-row-selector]'));
+    if (selectAll && rowSelectors.length) {
+      selectAll.addEventListener('change', () => {
+        rowSelectors.forEach((checkbox) => {
+          checkbox.checked = selectAll.checked;
+        });
+      });
+    }
+  })();
+</script>
 {% endblock %}

@@ -45,6 +45,7 @@ _ORIGINAL_RECIPIENT_PATTERNS = [
         re.IGNORECASE,
     ),
 ]
+ADMIN_PAGE_SIZE = 10
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
@@ -158,10 +159,10 @@ def create_app(
         )
 
     @app.get("/admin", response_class=HTMLResponse)
-    def admin_dashboard(request: Request) -> Response:
+    def admin_dashboard(request: Request, q: str = "", page: int = 1) -> Response:
         if not _is_admin(request):
             return RedirectResponse(url="/admin/login", status_code=status.HTTP_303_SEE_OTHER)
-        return _render_admin_dashboard(request)
+        return _render_admin_dashboard(request, search_query=q, page=page)
 
     @app.post("/admin/cloudmail")
     def admin_save_cloudmail_settings(
@@ -172,6 +173,8 @@ def create_app(
         internal_admin_password: str = Form(""),
         default_query_email: str = Form(""),
         recent_email_limit: str = Form(...),
+        q: str = Form(""),
+        page: int = Form(1),
     ) -> Response:
         if not _is_admin(request):
             return RedirectResponse(url="/admin/login", status_code=status.HTTP_303_SEE_OTHER)
@@ -186,9 +189,15 @@ def create_app(
                 recent_email_limit=recent_email_limit,
             )
         except ValueError as exc:
-            return _render_admin_dashboard(request, error=_translate_store_error(str(exc)), status_code=status.HTTP_400_BAD_REQUEST)
+            return _render_admin_dashboard(
+                request,
+                error=_translate_store_error(str(exc)),
+                status_code=status.HTTP_400_BAD_REQUEST,
+                search_query=q,
+                page=page,
+            )
 
-        return _render_admin_dashboard(request, message="CloudMail 配置已保存")
+        return _render_admin_dashboard(request, message="CloudMail 配置已保存", search_query=q, page=page)
 
     @app.post("/admin/keys")
     def admin_create_key(
@@ -221,6 +230,8 @@ def create_app(
         query_email: str = Form(""),
         access_key: str = Form(...),
         label: str = Form(""),
+        q: str = Form(""),
+        page: int = Form(1),
     ) -> Response:
         if not _is_admin(request):
             return RedirectResponse(url="/admin/login", status_code=status.HTTP_303_SEE_OTHER)
@@ -234,21 +245,61 @@ def create_app(
                 label=label,
             )
         except ValueError as exc:
-            return _render_admin_dashboard(request, error=_translate_store_error(str(exc)), status_code=status.HTTP_400_BAD_REQUEST)
+            return _render_admin_dashboard(
+                request,
+                error=_translate_store_error(str(exc)),
+                status_code=status.HTTP_400_BAD_REQUEST,
+                search_query=q,
+                page=page,
+            )
 
-        return _render_admin_dashboard(request, message="Key 已更新")
+        return _render_admin_dashboard(request, message="Key 已更新", search_query=q, page=page)
 
     @app.post("/admin/keys/{mapping_id}/delete")
-    def admin_delete_key(request: Request, mapping_id: int) -> Response:
+    def admin_delete_key(request: Request, mapping_id: int, q: str = Form(""), page: int = Form(1)) -> Response:
         if not _is_admin(request):
             return RedirectResponse(url="/admin/login", status_code=status.HTTP_303_SEE_OTHER)
 
         try:
             request.app.state.store.delete_mapping(mapping_id)
         except ValueError as exc:
-            return _render_admin_dashboard(request, error=_translate_store_error(str(exc)), status_code=status.HTTP_400_BAD_REQUEST)
+            return _render_admin_dashboard(
+                request,
+                error=_translate_store_error(str(exc)),
+                status_code=status.HTTP_400_BAD_REQUEST,
+                search_query=q,
+                page=page,
+            )
 
-        return _render_admin_dashboard(request, message="Key 已删除")
+        return _render_admin_dashboard(request, message="Key 已删除", search_query=q, page=page)
+
+    @app.post("/admin/keys/batch-delete")
+    def admin_batch_delete_keys(
+        request: Request,
+        mapping_ids: list[int] = Form([]),
+        q: str = Form(""),
+        page: int = Form(1),
+    ) -> Response:
+        if not _is_admin(request):
+            return RedirectResponse(url="/admin/login", status_code=status.HTTP_303_SEE_OTHER)
+
+        try:
+            deleted_count = request.app.state.store.delete_mappings(mapping_ids)
+        except ValueError as exc:
+            return _render_admin_dashboard(
+                request,
+                error=_translate_store_error(str(exc)),
+                status_code=status.HTTP_400_BAD_REQUEST,
+                search_query=q,
+                page=page,
+            )
+
+        return _render_admin_dashboard(
+            request,
+            message=f"已批量删除 {deleted_count} 个 Key",
+            search_query=q,
+            page=page,
+        )
 
     @app.post("/admin/logout")
     def admin_logout(request: Request) -> RedirectResponse:
@@ -268,8 +319,19 @@ def _render_admin_dashboard(
     error: str | None = None,
     message: str | None = None,
     status_code: int = 200,
+    search_query: str = "",
+    page: int = 1,
 ) -> HTMLResponse:
-    mappings = request.app.state.store.list_mappings()
+    normalized_page = max(page, 1)
+    total_mappings = request.app.state.store.count_mappings(search_query=search_query)
+    total_pages = max((total_mappings - 1) // ADMIN_PAGE_SIZE + 1, 1)
+    current_page = min(normalized_page, total_pages)
+    offset = (current_page - 1) * ADMIN_PAGE_SIZE
+    mappings = request.app.state.store.list_mappings(
+        search_query=search_query,
+        limit=ADMIN_PAGE_SIZE,
+        offset=offset,
+    )
     cloudmail_config = _get_cloudmail_settings_for_display(request)
     return _render(
         request,
@@ -279,6 +341,14 @@ def _render_admin_dashboard(
             "cloudmail_config": cloudmail_config,
             "error": error,
             "message": message,
+            "search_query": search_query,
+            "current_page": current_page,
+            "total_pages": total_pages,
+            "total_mappings": total_mappings,
+            "has_previous_page": current_page > 1,
+            "has_next_page": current_page < total_pages,
+            "previous_page": current_page - 1,
+            "next_page": current_page + 1,
         },
         status_code=status_code,
     )
@@ -349,6 +419,7 @@ def _translate_store_error(message: str) -> str:
         "access_key is required": "查看 Key 不能为空",
         "access_key already exists": "这个查看 Key 已经存在",
         "mapping not found": "这个 Key 记录不存在或已被删除",
+        "mapping_ids is required": "请至少选择一个 Key",
         "base_url is required": "CloudMail 地址不能为空",
         "api_token is required": "CloudMail Token 不能为空",
         "cloudmail_auth is required": "固定 Token 和管理员邮箱密码至少填一种",

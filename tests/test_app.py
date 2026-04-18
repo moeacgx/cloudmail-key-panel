@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from app.cloudmail import CloudMailMessage
 from app.main import _build_preview, create_app
 from app.settings import AppSettings
+from app.store import KeyStore
 
 
 class FakeCloudMailClient:
@@ -169,6 +170,9 @@ def test_admin_can_save_cloudmail_settings_and_lookup_uses_saved_token(tmp_path)
     assert 'name="query_email" value="openai@eve.ink"' in save_response.text
     assert 'name="internal_admin_email" value="admin@example.com"' in save_response.text
     assert 'name="recent_email_limit" min="1" step="1" value="3"' in save_response.text
+    assert 'id="cloudmail-config-dialog"' in save_response.text
+    assert 'data-cloudmail-config-trigger' in save_response.text
+    assert "编辑 CloudMail 配置" in save_response.text
 
     client.post(
         "/admin/keys",
@@ -303,6 +307,109 @@ def test_admin_can_edit_and_delete_key(tmp_path) -> None:
 
     missing_lookup = client.get("/mailbox/buyer-key-2")
     assert missing_lookup.status_code == 404
+
+
+def test_admin_dashboard_supports_key_search_and_pagination(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    for index in range(1, 13):
+        label = "special-order" if index == 7 else f"order-{index}"
+        store.create_mapping(
+            recipient_email=f"buyer{index:02d}@example.com",
+            query_email="openai@eve.ink",
+            access_key=f"buyer-key-{index:02d}",
+            label=label,
+        )
+
+    settings = AppSettings(
+        app_secret_key="test-secret",
+        app_admin_username="admin",
+        app_admin_password="pass123",
+        database_path=str(tmp_path / "app.db"),
+        cloudmail_base_url="https://mail.example.com",
+        cloudmail_admin_email="admin@example.com",
+        cloudmail_admin_password="secret",
+        lookup_email_limit=5,
+    )
+    app = create_app(settings=settings, store=store, cloudmail_client=FakeCloudMailClient())
+    client = TestClient(app)
+
+    client.post(
+        "/admin/login",
+        data={"username": "admin", "password": "pass123"},
+        follow_redirects=True,
+    )
+
+    search_response = client.get("/admin?q=special")
+    page_two_response = client.get("/admin?page=2")
+
+    assert search_response.status_code == 200
+    assert 'name="q" value="special"' in search_response.text
+    assert "buyer-key-07" in search_response.text
+    assert "buyer-key-12" not in search_response.text
+
+    assert page_two_response.status_code == 200
+    assert "buyer-key-02" in page_two_response.text
+    assert "buyer-key-01" in page_two_response.text
+    assert "buyer-key-12" not in page_two_response.text
+    assert "第 2 / 2 页" in page_two_response.text
+
+
+
+def test_admin_can_batch_delete_keys(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    first = store.create_mapping(
+        recipient_email="buyer1@example.com",
+        query_email="openai@eve.ink",
+        access_key="buyer-key-1",
+        label="first",
+    )
+    second = store.create_mapping(
+        recipient_email="buyer2@example.com",
+        query_email="openai@eve.ink",
+        access_key="buyer-key-2",
+        label="second",
+    )
+    third = store.create_mapping(
+        recipient_email="buyer3@example.com",
+        query_email="openai@eve.ink",
+        access_key="buyer-key-3",
+        label="third",
+    )
+
+    settings = AppSettings(
+        app_secret_key="test-secret",
+        app_admin_username="admin",
+        app_admin_password="pass123",
+        database_path=str(tmp_path / "app.db"),
+        cloudmail_base_url="https://mail.example.com",
+        cloudmail_admin_email="admin@example.com",
+        cloudmail_admin_password="secret",
+        lookup_email_limit=5,
+    )
+    app = create_app(settings=settings, store=store, cloudmail_client=FakeCloudMailClient())
+    client = TestClient(app)
+
+    client.post(
+        "/admin/login",
+        data={"username": "admin", "password": "pass123"},
+        follow_redirects=True,
+    )
+
+    response = client.post(
+        "/admin/keys/batch-delete",
+        data={"mapping_ids": [str(first.id), str(third.id)]},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert "已批量删除 2 个 Key" in response.text
+    assert "buyer-key-1" not in response.text
+    assert "buyer-key-3" not in response.text
+    assert "buyer-key-2" in response.text
+    assert store.get_by_key("buyer-key-1") is None
+    assert store.get_by_key(third.access_key) is None
+    assert store.get_by_key(second.access_key) is not None
+
 
 
 def test_build_preview_removes_email_html_css_noise() -> None:
