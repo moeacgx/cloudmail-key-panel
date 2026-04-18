@@ -257,6 +257,10 @@ def test_admin_can_edit_and_delete_key(tmp_path) -> None:
         follow_redirects=True,
     )
     assert "buyer-key-1" in create_response.text
+    assert "编辑这个 Key" in create_response.text
+    assert 'id="mapping-edit-dialog"' in create_response.text
+    assert 'name="recipient_email" value="buyer@example.com"' not in create_response.text
+    assert 'action="/admin/keys/1/update"' not in create_response.text
 
     edit_response = client.post(
         "/admin/keys/1/update",

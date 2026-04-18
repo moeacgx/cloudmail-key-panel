@@ -74,41 +74,110 @@
   {% if mappings %}
     <div class="mapping-list">
       {% for item in mappings %}
-        <article class="mapping-card">
-          <form method="post" action="/admin/keys/{{ item.id }}/update" class="stack-form">
-            <div class="mapping-grid">
-              <label>
-                <span>原始收件人邮箱</span>
-                <input type="email" name="recipient_email" value="{{ item.recipient_email }}" required>
-              </label>
-              <label>
-                <span>CloudMail 查询邮箱</span>
-                <input type="email" name="query_email" value="{{ item.query_email }}" placeholder="留空则优先使用后台默认查询邮箱，没有默认值时等于原始收件人邮箱">
-              </label>
-              <label>
-                <span>查看 Key</span>
-                <input type="text" name="access_key" value="{{ item.access_key }}" required>
-              </label>
-              <label>
-                <span>备注</span>
-                <input type="text" name="label" value="{{ item.label }}" placeholder="例如订单号 / 商品名">
-              </label>
+        <article class="mapping-card compact-mapping-card">
+          <div class="mapping-summary-grid">
+            <div class="mapping-field">
+              <span class="mapping-field-label">原始收件人邮箱</span>
+              <strong>{{ item.recipient_email }}</strong>
             </div>
-            <div class="mapping-meta">
-              <span>ID：{{ item.id }}</span>
-              <span>创建时间：{{ item.created_at }}</span>
+            <div class="mapping-field">
+              <span class="mapping-field-label">CloudMail 查询邮箱</span>
+              <code>{{ item.query_email }}</code>
             </div>
-            <div class="action-row">
-              <a class="button secondary" href="/mailbox/{{ item.access_key }}" target="_blank">打开前台</a>
-              <button type="submit">保存修改</button>
+            <div class="mapping-field">
+              <span class="mapping-field-label">查看 Key</span>
+              <code>{{ item.access_key }}</code>
             </div>
-          </form>
-          <form method="post" action="/admin/keys/{{ item.id }}/delete">
-            <button type="submit" class="danger">删除这个 Key</button>
-          </form>
+            <div class="mapping-field">
+              <span class="mapping-field-label">备注</span>
+              <span>{{ item.label or '—' }}</span>
+            </div>
+          </div>
+          <div class="mapping-meta">
+            <span>ID：{{ item.id }}</span>
+            <span>创建时间：{{ item.created_at }}</span>
+          </div>
+          <div class="action-row">
+            <a class="button secondary" href="/mailbox/{{ item.access_key }}" target="_blank">打开前台</a>
+            <button
+              type="button"
+              class="secondary"
+              data-edit-key-trigger
+              data-id="{{ item.id }}"
+              data-recipient-email="{{ item.recipient_email }}"
+              data-query-email="{{ item.query_email }}"
+              data-access-key="{{ item.access_key }}"
+              data-label="{{ item.label }}"
+            >编辑这个 Key</button>
+            <form method="post" action="/admin/keys/{{ item.id }}/delete" class="inline-form">
+              <button type="submit" class="danger">删除这个 Key</button>
+            </form>
+          </div>
         </article>
       {% endfor %}
     </div>
+
+    <dialog id="mapping-edit-dialog" class="mapping-dialog">
+      <div class="dialog-header">
+        <div>
+          <h3>编辑 Key</h3>
+          <p>这里只在点击编辑时弹出，不会把所有 Key 的内容都展开占满页面。</p>
+        </div>
+        <button type="button" class="secondary" data-close-dialog>关闭</button>
+      </div>
+      <form id="mapping-edit-form" method="post" class="stack-form">
+        <div class="mapping-grid">
+          <label>
+            <span>原始收件人邮箱</span>
+            <input id="edit-recipient-email" type="email" name="recipient_email" required>
+          </label>
+          <label>
+            <span>CloudMail 查询邮箱</span>
+            <input id="edit-query-email" type="email" name="query_email" placeholder="留空则优先使用后台默认查询邮箱，没有默认值时等于原始收件人邮箱">
+          </label>
+          <label>
+            <span>查看 Key</span>
+            <input id="edit-access-key" type="text" name="access_key" required>
+          </label>
+          <label>
+            <span>备注</span>
+            <input id="edit-label" type="text" name="label" placeholder="例如订单号 / 商品名">
+          </label>
+        </div>
+        <div class="action-row">
+          <button type="submit">保存修改</button>
+          <button type="button" class="secondary" data-close-dialog>取消</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script>
+      (() => {
+        const dialog = document.getElementById('mapping-edit-dialog');
+        const form = document.getElementById('mapping-edit-form');
+        if (!dialog || !form) return;
+
+        const recipientInput = document.getElementById('edit-recipient-email');
+        const queryInput = document.getElementById('edit-query-email');
+        const keyInput = document.getElementById('edit-access-key');
+        const labelInput = document.getElementById('edit-label');
+
+        document.querySelectorAll('[data-edit-key-trigger]').forEach((button) => {
+          button.addEventListener('click', () => {
+            form.action = `/admin/keys/${button.dataset.id}/update`;
+            recipientInput.value = button.dataset.recipientEmail || '';
+            queryInput.value = button.dataset.queryEmail || '';
+            keyInput.value = button.dataset.accessKey || '';
+            labelInput.value = button.dataset.label || '';
+            dialog.showModal();
+          });
+        });
+
+        dialog.querySelectorAll('[data-close-dialog]').forEach((button) => {
+          button.addEventListener('click', () => dialog.close());
+        });
+      })();
+    </script>
   {% else %}
     <div class="alert">暂时还没有 Key。</div>
   {% endif %}

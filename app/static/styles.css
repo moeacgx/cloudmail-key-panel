@@ -217,6 +217,28 @@ button,
   background: #fcfcfd;
 }
 
+.compact-mapping-card {
+  display: grid;
+  gap: 14px;
+}
+
+.mapping-summary-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.mapping-field {
+  display: grid;
+  gap: 6px;
+}
+
+.mapping-field-label {
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
 .mapping-grid {
   display: grid;
   gap: 16px;
@@ -236,6 +258,39 @@ button,
   gap: 12px;
   flex-wrap: wrap;
   align-items: center;
+}
+
+.inline-form {
+  margin: 0;
+}
+
+.mapping-dialog {
+  width: min(760px, calc(100vw - 32px));
+  border: none;
+  border-radius: 20px;
+  padding: 20px;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
+}
+
+.mapping-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.dialog-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.dialog-header h3 {
+  margin: 0 0 8px;
+}
+
+.dialog-header p {
+  margin: 0;
+  color: var(--muted);
 }
 
 .danger {
