@@ -60,6 +60,12 @@ CLOUDMAIL_ADMIN_PASSWORD=replace-with-your-cloudmail-password
 LOOKUP_EMAIL_LIMIT=10
 ```
 
+说明：
+- `.env` 里的 CloudMail 配置现在只是“默认值 / 启动兜底值”。
+- 真正推荐的方式，是登录后台后直接在“CloudMail 配置”表单里填写地址和固定 Token。
+- 后台保存后会写入 SQLite，后续查询优先使用后台里保存的配置，不需要反复改 `.env`。
+
+
 ## CloudMail API 对接
 
 项目当前使用了以下接口：

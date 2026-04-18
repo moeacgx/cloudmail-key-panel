@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import hmac
 import re
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import FastAPI, Form, Request, Response, status
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -11,10 +12,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.cloudmail import CloudMailClient
+from app.cloudmail import CloudMailClient, CloudMailError
 from app.code_extractor import extract_verification_codes
 from app.settings import AppSettings
-from app.store import KeyStore
+from app.store import CloudMailSettingsRecord, KeyStore
 
 _TAG_PATTERN = re.compile(r"<[^>]+>")
 _WHITESPACE_PATTERN = re.compile(r"\s+")
@@ -22,19 +23,22 @@ BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
+@dataclass(slots=True)
+class ResolvedCloudMailConfig:
+    base_url: str
+    api_token: str | None = None
+    admin_email: str | None = None
+    admin_password: str | None = None
+
+
 def create_app(
     settings: AppSettings | None = None,
     store: KeyStore | None = None,
-    cloudmail_client: CloudMailClient | Any | None = None,
+    cloudmail_client: Any | None = None,
+    cloudmail_client_factory: Callable[[ResolvedCloudMailConfig], Any] | None = None,
 ) -> FastAPI:
     resolved_settings = settings or AppSettings.from_env()
     resolved_store = store or KeyStore(resolved_settings.database_path)
-    resolved_cloudmail = cloudmail_client or CloudMailClient(
-        base_url=resolved_settings.cloudmail_base_url,
-        admin_email=resolved_settings.cloudmail_admin_email,
-        admin_password=resolved_settings.cloudmail_admin_password,
-        api_token=resolved_settings.cloudmail_api_token,
-    )
 
     app = FastAPI(title=resolved_settings.app_name)
     app.add_middleware(SessionMiddleware, secret_key=resolved_settings.app_secret_key)
@@ -42,7 +46,8 @@ def create_app(
 
     app.state.settings = resolved_settings
     app.state.store = resolved_store
-    app.state.cloudmail = resolved_cloudmail
+    app.state.fixed_cloudmail_client = cloudmail_client
+    app.state.cloudmail_client_factory = cloudmail_client_factory
 
     @app.get("/", response_class=HTMLResponse)
     def home(request: Request) -> HTMLResponse:
@@ -66,10 +71,19 @@ def create_app(
                 status_code=status.HTTP_404_NOT_FOUND,
             )
 
-        emails = request.app.state.cloudmail.fetch_recent_emails(
-            mapping.recipient_email,
-            limit=request.app.state.settings.lookup_email_limit,
-        )
+        try:
+            emails = _get_cloudmail_client(request).fetch_recent_emails(
+                mapping.recipient_email,
+                limit=request.app.state.settings.lookup_email_limit,
+            )
+        except CloudMailError as exc:
+            return _render(
+                request,
+                "mailbox.html",
+                {"mapping": mapping, "emails": [], "error": f"CloudMail 查询失败：{exc}"},
+                status_code=status.HTTP_502_BAD_GATEWAY,
+            )
+
         rendered_emails = [
             {
                 "message": email,
@@ -111,6 +125,22 @@ def create_app(
             return RedirectResponse(url="/admin/login", status_code=status.HTTP_303_SEE_OTHER)
         return _render_admin_dashboard(request)
 
+    @app.post("/admin/cloudmail")
+    def admin_save_cloudmail_settings(
+        request: Request,
+        base_url: str = Form(...),
+        api_token: str = Form(...),
+    ) -> Response:
+        if not _is_admin(request):
+            return RedirectResponse(url="/admin/login", status_code=status.HTTP_303_SEE_OTHER)
+
+        try:
+            request.app.state.store.save_cloudmail_settings(base_url=base_url, api_token=api_token)
+        except ValueError as exc:
+            return _render_admin_dashboard(request, error=_translate_store_error(str(exc)), status_code=status.HTTP_400_BAD_REQUEST)
+
+        return _render_admin_dashboard(request, message="CloudMail 配置已保存")
+
     @app.post("/admin/keys")
     def admin_create_key(
         request: Request,
@@ -128,7 +158,7 @@ def create_app(
                 label=label,
             )
         except ValueError as exc:
-            return _render_admin_dashboard(request, error=str(exc), status_code=status.HTTP_400_BAD_REQUEST)
+            return _render_admin_dashboard(request, error=_translate_store_error(str(exc)), status_code=status.HTTP_400_BAD_REQUEST)
 
         return RedirectResponse(url="/admin", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -145,9 +175,76 @@ def _render(request: Request, template_name: str, context: dict[str, Any], statu
     return TEMPLATES.TemplateResponse(request, template_name, merged, status_code=status_code)
 
 
-def _render_admin_dashboard(request: Request, error: str | None = None, status_code: int = 200) -> HTMLResponse:
+def _render_admin_dashboard(
+    request: Request,
+    error: str | None = None,
+    message: str | None = None,
+    status_code: int = 200,
+) -> HTMLResponse:
     mappings = request.app.state.store.list_mappings()
-    return _render(request, "admin_dashboard.html", {"mappings": mappings, "error": error}, status_code=status_code)
+    cloudmail_config = _get_cloudmail_settings_for_display(request)
+    return _render(
+        request,
+        "admin_dashboard.html",
+        {
+            "mappings": mappings,
+            "cloudmail_config": cloudmail_config,
+            "error": error,
+            "message": message,
+        },
+        status_code=status_code,
+    )
+
+
+def _get_cloudmail_settings_for_display(request: Request) -> CloudMailSettingsRecord:
+    settings = request.app.state.settings
+    return request.app.state.store.get_cloudmail_settings(
+        default_base_url=settings.cloudmail_base_url,
+        default_api_token=settings.cloudmail_api_token or "",
+    )
+
+
+def _resolve_cloudmail_config(request: Request) -> ResolvedCloudMailConfig:
+    settings = request.app.state.settings
+    saved = _get_cloudmail_settings_for_display(request)
+    return ResolvedCloudMailConfig(
+        base_url=saved.base_url,
+        api_token=saved.api_token or None,
+        admin_email=settings.cloudmail_admin_email or None,
+        admin_password=settings.cloudmail_admin_password or None,
+    )
+
+
+def _get_cloudmail_client(request: Request) -> Any:
+    if request.app.state.fixed_cloudmail_client is not None:
+        return request.app.state.fixed_cloudmail_client
+
+    config = _resolve_cloudmail_config(request)
+    if not config.base_url:
+        raise CloudMailError("请先在后台填写 CloudMail 地址")
+    if not config.api_token and not (config.admin_email and config.admin_password):
+        raise CloudMailError("请先在后台填写 CloudMail Token")
+
+    if request.app.state.cloudmail_client_factory is not None:
+        return request.app.state.cloudmail_client_factory(config)
+
+    return CloudMailClient(
+        base_url=config.base_url,
+        admin_email=config.admin_email,
+        admin_password=config.admin_password,
+        api_token=config.api_token,
+    )
+
+
+def _translate_store_error(message: str) -> str:
+    mapping = {
+        "recipient_email is required": "原始收件人邮箱不能为空",
+        "access_key is required": "查看 Key 不能为空",
+        "access_key already exists": "这个查看 Key 已经存在",
+        "base_url is required": "CloudMail 地址不能为空",
+        "api_token is required": "CloudMail Token 不能为空",
+    }
+    return mapping.get(message, message)
 
 
 def _is_valid_admin_login(settings: AppSettings, username: str, password: str) -> bool:

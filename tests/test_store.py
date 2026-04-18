@@ -38,3 +38,18 @@ def test_key_store_rejects_duplicate_access_keys(tmp_path) -> None:
 
     with pytest.raises(ValueError):
         store.create_mapping(recipient_email="another@example.com", access_key="repeat-key")
+
+
+def test_key_store_persists_cloudmail_settings(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+
+    saved = store.save_cloudmail_settings(
+        base_url=" https://mail.boxmoe.eu.org/ ",
+        api_token=" fixed-token-123 ",
+    )
+    loaded = store.get_cloudmail_settings()
+
+    assert saved.base_url == "https://mail.boxmoe.eu.org/"
+    assert saved.api_token == "fixed-token-123"
+    assert loaded.base_url == "https://mail.boxmoe.eu.org/"
+    assert loaded.api_token == "fixed-token-123"

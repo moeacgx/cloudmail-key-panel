@@ -4,8 +4,8 @@
 <section class="card">
   <div class="mailbox-header">
     <div>
-      <h2>创建查看 Key</h2>
-      <p>绑定原始收件人邮箱（To / 收件人），前台用户凭 Key 查看最近验证码邮件。</p>
+      <h2>CloudMail 配置</h2>
+      <p>直接在后台填写 CloudMail 地址和固定 Token。保存后后续查询会优先使用这里的配置，不需要再去改 .env。</p>
     </div>
     <form method="post" action="/admin/logout">
       <button type="submit" class="secondary">退出登录</button>
@@ -15,6 +15,30 @@
   {% if error %}
     <div class="alert error">{{ error }}</div>
   {% endif %}
+  {% if message %}
+    <div class="alert success">{{ message }}</div>
+  {% endif %}
+
+  <form method="post" action="/admin/cloudmail" class="stack-form">
+    <label>
+      <span>CloudMail 地址</span>
+      <input type="url" name="base_url" value="{{ cloudmail_config.base_url }}" placeholder="https://mail.boxmoe.eu.org/" required>
+    </label>
+    <label>
+      <span>固定 Token</span>
+      <input type="text" name="api_token" value="{{ cloudmail_config.api_token }}" placeholder="请输入固定 Token" required>
+    </label>
+    <button type="submit">保存 CloudMail 配置</button>
+  </form>
+</section>
+
+<section class="card">
+  <div class="mailbox-header">
+    <div>
+      <h2>创建查看 Key</h2>
+      <p>绑定原始收件人邮箱（To / 收件人），前台用户凭 Key 查看最近验证码邮件。</p>
+    </div>
+  </div>
 
   <form method="post" action="/admin/keys" class="stack-form">
     <label>

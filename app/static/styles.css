@@ -122,6 +122,11 @@ button,
   color: var(--danger);
 }
 
+.alert.success {
+  background: #ecfdf5;
+  color: #047857;
+}
+
 .mailbox-header {
   display: flex;
   justify-content: space-between;
