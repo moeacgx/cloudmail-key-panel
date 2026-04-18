@@ -2,68 +2,45 @@
 
 {% block content %}
 <section class="card">
-  {% if error %}
-    <div class="alert error">{{ error }}</div>
-  {% else %}
-    <div class="mailbox-header">
-      <div>
-        <h2>最近验证码邮件</h2>
-        <p>当前收件人：<strong>{{ mapping.recipient_email }}</strong></p>
-        <p>查看 Key：<code>{{ mapping.access_key }}</code></p>
-      </div>
-      <a class="button secondary" href="/">重新输入 Key</a>
-    </div>
-
-    {% if notice %}
-      <div class="alert">{{ notice }}</div>
-    {% endif %}
-
-    {% if emails %}
-      <div class="mail-grid">
-        {% for item in emails %}
-          <article class="mail-card">
-            <div class="mail-topline">
-              <h3>{{ item.message.subject or '无主题' }}</h3>
-              <span>{{ item.message.create_time }}</span>
-            </div>
-            <div class="mail-meta-grid">
-              <div class="mail-meta-item">
-                <span class="mail-meta-label">发件人</span>
-                <p class="mail-meta-value">{{ item.message.send_email or '未知' }}</p>
-              </div>
-              <div class="mail-meta-item">
-                <span class="mail-meta-label">收件人</span>
-                <p class="mail-meta-value">{{ mapping.recipient_email }}</p>
-              </div>
-            </div>
-
-            <div class="code-list">
-              {% if item.codes %}
-                {% for code in item.codes %}
-                  <span class="code-chip">{{ code }}</span>
-                {% endfor %}
-              {% else %}
-                <span class="code-chip muted">未提取到明显验证码</span>
-              {% endif %}
-            </div>
-
-            <div class="mail-preview-stack">
-              <div class="preview-snippet">
-                {{ item.preview }}
-              </div>
-              <details class="mail-preview-details">
-                <summary class="mail-preview-summary">展开完整邮件内容</summary>
-                <div class="preview-box">
-                  {{ item.preview }}
-                </div>
-              </details>
-            </div>
-          </article>
-        {% endfor %}
-      </div>
-    {% elif not notice %}
-      <div class="alert">当前没有查到邮件。</div>
-    {% endif %}
-  {% endif %}
+  <div
+    id="mailbox-live-region"
+    data-mailbox-live-region
+    data-fragment-url="{{ request.url_for('mailbox_fragment', access_key=access_key) }}"
+    data-poll-interval-ms="{{ mailbox_poll_interval_ms }}"
+  >
+    {% include "mailbox_content.html" %}
+  </div>
 </section>
+
+<script>
+  (() => {
+    const region = document.querySelector('[data-mailbox-live-region]');
+    if (!region) return;
+
+    const fragmentUrl = region.dataset.fragmentUrl;
+    const interval = Number(region.dataset.pollIntervalMs || '10000');
+    if (!fragmentUrl || interval <= 0) return;
+
+    let refreshing = false;
+
+    const refreshMailbox = async () => {
+      if (refreshing) return;
+      refreshing = true;
+      try {
+        const response = await fetch(fragmentUrl, {
+          headers: { 'X-Requested-With': 'mailbox-live-refresh' },
+          cache: 'no-store',
+        });
+        const html = await response.text();
+        region.innerHTML = html;
+      } catch (error) {
+        console.warn('mailbox refresh failed', error);
+      } finally {
+        refreshing = false;
+      }
+    };
+
+    window.setInterval(refreshMailbox, interval);
+  })();
+</script>
 {% endblock %}

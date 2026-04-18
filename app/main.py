@@ -46,6 +46,7 @@ _ORIGINAL_RECIPIENT_PATTERNS = [
     ),
 ]
 ADMIN_PAGE_SIZE = 10
+MAILBOX_POLL_INTERVAL_MS = 10000
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
@@ -96,46 +97,22 @@ def create_app(
 
     @app.get("/mailbox/{access_key}", response_class=HTMLResponse)
     def mailbox(request: Request, access_key: str) -> HTMLResponse:
-        mapping = request.app.state.store.get_by_key(access_key)
-        if mapping is None:
-            return _render(
-                request,
-                "mailbox.html",
-                {"mapping": None, "emails": [], "error": "Key 不存在或已失效"},
-                status_code=status.HTTP_404_NOT_FOUND,
-            )
-
-        cloudmail_settings = _get_cloudmail_settings_for_display(request)
-
-        try:
-            emails = _get_cloudmail_client(request).fetch_recent_emails(
-                mapping.query_email,
-                limit=cloudmail_settings.recent_email_limit,
-            )
-        except CloudMailError as exc:
-            return _render(
-                request,
-                "mailbox.html",
-                {"mapping": mapping, "emails": [], "error": f"CloudMail 查询失败：{exc}"},
-                status_code=status.HTTP_502_BAD_GATEWAY,
-            )
-
-        filtered_emails, notice = _filter_emails_for_mapping(mapping.recipient_email, mapping.query_email, emails)
-
-        rendered_emails = [
-            {
-                "message": email,
-                "codes": extract_verification_codes(email.subject, email.text, email.content),
-                "preview": _build_preview(email.text, email.content),
-                "detected_recipients": detected_recipients,
-            }
-            for email, detected_recipients in filtered_emails
-        ]
+        mailbox_context, status_code = _build_mailbox_context(request, access_key)
         return _render(
             request,
             "mailbox.html",
-            {"mapping": mapping, "emails": rendered_emails, "error": None, "notice": notice},
+            {
+                **mailbox_context,
+                "access_key": access_key,
+                "mailbox_poll_interval_ms": MAILBOX_POLL_INTERVAL_MS,
+            },
+            status_code=status_code,
         )
+
+    @app.get("/mailbox/{access_key}/fragment", response_class=HTMLResponse)
+    def mailbox_fragment(request: Request, access_key: str) -> HTMLResponse:
+        mailbox_context, status_code = _build_mailbox_context(request, access_key)
+        return _render(request, "mailbox_content.html", {**mailbox_context, "access_key": access_key}, status_code=status_code)
 
     @app.get("/admin/login", response_class=HTMLResponse)
     def admin_login(request: Request) -> HTMLResponse:
@@ -355,6 +332,44 @@ def create_app(
 def _render(request: Request, template_name: str, context: dict[str, Any], status_code: int = 200) -> HTMLResponse:
     merged = {"settings": request.app.state.settings, **context}
     return TEMPLATES.TemplateResponse(request, template_name, merged, status_code=status_code)
+
+
+def _build_mailbox_context(request: Request, access_key: str) -> tuple[dict[str, Any], int]:
+    mapping = request.app.state.store.get_by_key(access_key)
+    if mapping is None:
+        return {"mapping": None, "emails": [], "error": "Key 不存在或已失效", "notice": None}, status.HTTP_404_NOT_FOUND
+
+    cloudmail_settings = _get_cloudmail_settings_for_display(request)
+
+    try:
+        emails = _get_cloudmail_client(request).fetch_recent_emails(
+            mapping.query_email,
+            limit=cloudmail_settings.recent_email_limit,
+        )
+    except CloudMailError as exc:
+        return {
+            "mapping": mapping,
+            "emails": [],
+            "error": f"CloudMail 查询失败：{exc}",
+            "notice": None,
+        }, status.HTTP_502_BAD_GATEWAY
+
+    filtered_emails, notice = _filter_emails_for_mapping(mapping.recipient_email, mapping.query_email, emails)
+    rendered_emails = [
+        {
+            "message": email,
+            "codes": extract_verification_codes(email.subject, email.text, email.content),
+            "preview": _build_preview(email.text, email.content),
+            "detected_recipients": detected_recipients,
+        }
+        for email, detected_recipients in filtered_emails
+    ]
+    return {
+        "mapping": mapping,
+        "emails": rendered_emails,
+        "error": None,
+        "notice": notice,
+    }, status.HTTP_200_OK
 
 
 def _render_admin_dashboard(

@@ -532,6 +532,76 @@ def test_mailbox_uses_compact_expandable_preview(tmp_path) -> None:
 
 
 
+def test_mailbox_supports_live_fragment_refresh_without_full_page_reload(tmp_path) -> None:
+    fake_cloudmail = FakeCloudMailClient(
+        messages=[
+            CloudMailMessage(
+                email_id=1,
+                send_email="noreply@tm.openai.com",
+                send_name="OpenAI",
+                subject="旧验证码 111111",
+                to_email="buyer@example.com",
+                to_name="",
+                create_time="2026-04-18 10:56:53",
+                type=0,
+                content="<div>旧验证码</div><div>111111</div>",
+                text="旧验证码\n111111",
+                is_del=0,
+            )
+        ]
+    )
+    store = KeyStore(tmp_path / "app.db")
+    store.create_mapping(
+        recipient_email="buyer@example.com",
+        query_email="buyer@example.com",
+        access_key="live-key",
+        label="demo",
+    )
+    settings = AppSettings(
+        app_secret_key="test-secret",
+        app_admin_username="admin",
+        app_admin_password="pass123",
+        database_path=str(tmp_path / "app.db"),
+        cloudmail_base_url="https://mail.example.com",
+        cloudmail_admin_email="admin@example.com",
+        cloudmail_admin_password="secret",
+        lookup_email_limit=5,
+    )
+    app = create_app(settings=settings, store=store, cloudmail_client=fake_cloudmail)
+    client = TestClient(app)
+
+    page_response = client.get("/mailbox/live-key")
+
+    assert page_response.status_code == 200
+    assert 'data-mailbox-live-region' in page_response.text
+    assert '/mailbox/live-key/fragment' in page_response.text
+    assert 'setInterval' in page_response.text
+
+    fake_cloudmail.messages = [
+        CloudMailMessage(
+            email_id=2,
+            send_email="noreply@tm.openai.com",
+            send_name="OpenAI",
+            subject="新验证码 222222",
+            to_email="buyer@example.com",
+            to_name="",
+            create_time="2026-04-18 10:57:53",
+            type=0,
+            content="<div>新验证码</div><div>222222</div>",
+            text="新验证码\n222222",
+            is_del=0,
+        )
+    ]
+
+    fragment_response = client.get("/mailbox/live-key/fragment")
+
+    assert fragment_response.status_code == 200
+    assert "新验证码 222222" in fragment_response.text
+    assert "222222" in fragment_response.text
+    assert "旧验证码 111111" not in fragment_response.text
+
+
+
 def test_build_preview_removes_email_html_css_noise() -> None:
     preview = _build_preview(
         "",

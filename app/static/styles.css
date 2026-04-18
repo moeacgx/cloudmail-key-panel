@@ -162,6 +162,12 @@ button,
   gap: 16px;
 }
 
+.mail-refresh-hint {
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
 .mail-card {
   border: 1px solid var(--border);
   border-radius: 14px;
