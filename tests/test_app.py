@@ -161,3 +161,41 @@ def test_admin_can_save_cloudmail_settings_and_lookup_uses_saved_token(tmp_path)
     assert fake_factory.calls == [("buyer@example.com", 5)]
     assert fake_factory.configs[-1].base_url == "https://mail.boxmoe.eu.org/"
     assert fake_factory.configs[-1].api_token == "fixed-token-123"
+
+
+def test_public_pages_do_not_show_top_nav_buttons(tmp_path) -> None:
+    fake_cloudmail = FakeCloudMailClient()
+    settings = AppSettings(
+        app_secret_key="test-secret",
+        app_admin_username="admin",
+        app_admin_password="pass123",
+        database_path=str(tmp_path / "app.db"),
+        cloudmail_base_url="https://mail.example.com",
+        cloudmail_admin_email="admin@example.com",
+        cloudmail_admin_password="secret",
+        lookup_email_limit=5,
+    )
+    app = create_app(settings=settings, cloudmail_client=fake_cloudmail)
+    client = TestClient(app)
+
+    client.post(
+        "/admin/login",
+        data={"username": "admin", "password": "pass123"},
+        follow_redirects=True,
+    )
+    client.post(
+        "/admin/keys",
+        data={
+            "recipient_email": "buyer@example.com",
+            "access_key": "buyer-key-1",
+            "label": "buyer-order",
+        },
+        follow_redirects=True,
+    )
+
+    home_response = client.get("/")
+    mailbox_response = client.get("/mailbox/buyer-key-1")
+
+    for page in (home_response.text, mailbox_response.text):
+        assert "前台查询" not in page
+        assert "后台管理" not in page
