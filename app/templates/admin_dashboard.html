@@ -32,6 +32,10 @@
       <span>默认 CloudMail 查询邮箱（可选）</span>
       <input type="email" name="default_query_email" value="{{ cloudmail_config.default_query_email }}" placeholder="例如：openai@eve.ink">
     </label>
+    <label>
+      <span>实时拉取最近几封邮件</span>
+      <input type="number" name="recent_email_limit" min="1" step="1" value="{{ cloudmail_config.recent_email_limit }}" placeholder="例如：3" required>
+    </label>
     <button type="submit">保存 CloudMail 配置</button>
   </form>
 </section>

@@ -83,10 +83,12 @@ def create_app(
                 status_code=status.HTTP_404_NOT_FOUND,
             )
 
+        cloudmail_settings = _get_cloudmail_settings_for_display(request)
+
         try:
             emails = _get_cloudmail_client(request).fetch_recent_emails(
                 mapping.query_email,
-                limit=request.app.state.settings.lookup_email_limit,
+                limit=cloudmail_settings.recent_email_limit,
             )
         except CloudMailError as exc:
             return _render(
@@ -146,6 +148,7 @@ def create_app(
         base_url: str = Form(...),
         api_token: str = Form(...),
         default_query_email: str = Form(""),
+        recent_email_limit: str = Form(...),
     ) -> Response:
         if not _is_admin(request):
             return RedirectResponse(url="/admin/login", status_code=status.HTTP_303_SEE_OTHER)
@@ -155,6 +158,7 @@ def create_app(
                 base_url=base_url,
                 api_token=api_token,
                 default_query_email=default_query_email,
+                recent_email_limit=recent_email_limit,
             )
         except ValueError as exc:
             return _render_admin_dashboard(request, error=_translate_store_error(str(exc)), status_code=status.HTTP_400_BAD_REQUEST)
@@ -260,6 +264,7 @@ def _get_cloudmail_settings_for_display(request: Request) -> CloudMailSettingsRe
     return request.app.state.store.get_cloudmail_settings(
         default_base_url=settings.cloudmail_base_url,
         default_api_token=settings.cloudmail_api_token or "",
+        default_recent_email_limit=settings.lookup_email_limit,
     )
 
 
@@ -313,6 +318,7 @@ def _translate_store_error(message: str) -> str:
         "mapping not found": "这个 Key 记录不存在或已被删除",
         "base_url is required": "CloudMail 地址不能为空",
         "api_token is required": "CloudMail Token 不能为空",
+        "recent_email_limit must be a positive integer": "最新邮件数量必须是大于 0 的整数",
     }
     return mapping.get(message, message)
 

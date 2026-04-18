@@ -152,6 +152,7 @@ def test_admin_can_save_cloudmail_settings_and_lookup_uses_saved_token(tmp_path)
             "base_url": "https://mail.boxmoe.eu.org/",
             "api_token": "fixed-token-123",
             "default_query_email": "openai@eve.ink",
+            "recent_email_limit": "3",
         },
         follow_redirects=True,
     )
@@ -160,6 +161,7 @@ def test_admin_can_save_cloudmail_settings_and_lookup_uses_saved_token(tmp_path)
     assert "CloudMail 配置已保存" in save_response.text
     assert "https://mail.boxmoe.eu.org/" in save_response.text
     assert 'name="query_email" value="openai@eve.ink"' in save_response.text
+    assert 'name="recent_email_limit" min="1" step="1" value="3"' in save_response.text
 
     client.post(
         "/admin/keys",
@@ -178,7 +180,7 @@ def test_admin_can_save_cloudmail_settings_and_lookup_uses_saved_token(tmp_path)
     )
 
     assert lookup_response.status_code == 200
-    assert fake_factory.calls == [("openai@eve.ink", 5)]
+    assert fake_factory.calls == [("openai@eve.ink", 3)]
     assert fake_factory.configs[-1].base_url == "https://mail.boxmoe.eu.org/"
     assert fake_factory.configs[-1].api_token == "fixed-token-123"
 

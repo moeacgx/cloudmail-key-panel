@@ -22,6 +22,7 @@ class CloudMailSettingsRecord:
     base_url: str
     api_token: str
     default_query_email: str
+    recent_email_limit: int
     updated_at: str
 
 
@@ -155,6 +156,7 @@ class KeyStore:
         base_url: str,
         api_token: str,
         default_query_email: str = "",
+        recent_email_limit: int | str = 10,
     ) -> CloudMailSettingsRecord:
         normalized_base_url = base_url.strip()
         normalized_api_token = api_token.strip()
@@ -165,6 +167,7 @@ class KeyStore:
         if not normalized_api_token:
             raise ValueError("api_token is required")
 
+        normalized_recent_email_limit = self._normalize_recent_email_limit(recent_email_limit)
         updated_at = self._now()
 
         with self._connect() as connection:
@@ -178,6 +181,7 @@ class KeyStore:
                     ("cloudmail_base_url", normalized_base_url, updated_at),
                     ("cloudmail_api_token", normalized_api_token, updated_at),
                     ("default_query_email", normalized_default_query_email, updated_at),
+                    ("recent_email_limit", str(normalized_recent_email_limit), updated_at),
                 ],
             )
             connection.commit()
@@ -186,6 +190,7 @@ class KeyStore:
             base_url=normalized_base_url,
             api_token=normalized_api_token,
             default_query_email=normalized_default_query_email,
+            recent_email_limit=normalized_recent_email_limit,
             updated_at=updated_at,
         )
 
@@ -194,16 +199,18 @@ class KeyStore:
         default_base_url: str = "",
         default_api_token: str = "",
         default_query_email: str = "",
+        default_recent_email_limit: int = 10,
     ) -> CloudMailSettingsRecord:
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT key, value, updated_at FROM app_settings WHERE key IN ('cloudmail_base_url', 'cloudmail_api_token', 'default_query_email')"
+                "SELECT key, value, updated_at FROM app_settings WHERE key IN ('cloudmail_base_url', 'cloudmail_api_token', 'default_query_email', 'recent_email_limit')"
             ).fetchall()
 
         values = {
             "cloudmail_base_url": default_base_url,
             "cloudmail_api_token": default_api_token,
             "default_query_email": default_query_email,
+            "recent_email_limit": str(default_recent_email_limit),
         }
         updated_at = ""
 
@@ -215,6 +222,7 @@ class KeyStore:
             base_url=values["cloudmail_base_url"],
             api_token=values["cloudmail_api_token"],
             default_query_email=values["default_query_email"],
+            recent_email_limit=self._normalize_recent_email_limit(values["recent_email_limit"]),
             updated_at=updated_at,
         )
 
@@ -258,6 +266,16 @@ class KeyStore:
         connection = sqlite3.connect(self.db_path)
         connection.row_factory = sqlite3.Row
         return connection
+
+    @staticmethod
+    def _normalize_recent_email_limit(value: int | str) -> int:
+        try:
+            normalized = int(str(value).strip())
+        except (TypeError, ValueError) as exc:
+            raise ValueError("recent_email_limit must be a positive integer") from exc
+        if normalized <= 0:
+            raise ValueError("recent_email_limit must be a positive integer")
+        return normalized
 
     @staticmethod
     def _generate_key() -> str:
