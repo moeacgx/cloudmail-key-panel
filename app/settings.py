@@ -16,6 +16,8 @@ class AppSettings:
     cloudmail_base_url: str = "https://mail.example.com"
     cloudmail_admin_email: str = ""
     cloudmail_admin_password: str = ""
+    cloudmail_internal_admin_email: str = ""
+    cloudmail_internal_admin_password: str = ""
     cloudmail_api_token: str | None = None
     lookup_email_limit: int = 10
 
@@ -32,6 +34,8 @@ class AppSettings:
             cloudmail_base_url=os.getenv("CLOUDMAIL_BASE_URL", defaults.cloudmail_base_url),
             cloudmail_admin_email=os.getenv("CLOUDMAIL_ADMIN_EMAIL", defaults.cloudmail_admin_email),
             cloudmail_admin_password=os.getenv("CLOUDMAIL_ADMIN_PASSWORD", defaults.cloudmail_admin_password),
+            cloudmail_internal_admin_email=os.getenv("CLOUDMAIL_INTERNAL_ADMIN_EMAIL", defaults.cloudmail_internal_admin_email),
+            cloudmail_internal_admin_password=os.getenv("CLOUDMAIL_INTERNAL_ADMIN_PASSWORD", defaults.cloudmail_internal_admin_password),
             cloudmail_api_token=os.getenv("CLOUDMAIL_API_TOKEN") or None,
             lookup_email_limit=int(os.getenv("LOOKUP_EMAIL_LIMIT", str(defaults.lookup_email_limit))),
         )

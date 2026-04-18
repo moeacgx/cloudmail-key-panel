@@ -39,6 +39,7 @@ class FakeCloudMailClient:
                 content=message.content,
                 text=message.text,
                 is_del=message.is_del,
+                recipient=message.recipient,
             )
             for message in self.messages[:limit]
         ]
@@ -151,6 +152,8 @@ def test_admin_can_save_cloudmail_settings_and_lookup_uses_saved_token(tmp_path)
         data={
             "base_url": "https://mail.boxmoe.eu.org/",
             "api_token": "fixed-token-123",
+            "internal_admin_email": "admin@example.com",
+            "internal_admin_password": "secret",
             "default_query_email": "openai@eve.ink",
             "recent_email_limit": "3",
         },
@@ -161,6 +164,7 @@ def test_admin_can_save_cloudmail_settings_and_lookup_uses_saved_token(tmp_path)
     assert "CloudMail 配置已保存" in save_response.text
     assert "https://mail.boxmoe.eu.org/" in save_response.text
     assert 'name="query_email" value="openai@eve.ink"' in save_response.text
+    assert 'name="internal_admin_email" value="admin@example.com"' in save_response.text
     assert 'name="recent_email_limit" min="1" step="1" value="3"' in save_response.text
 
     client.post(
@@ -183,6 +187,8 @@ def test_admin_can_save_cloudmail_settings_and_lookup_uses_saved_token(tmp_path)
     assert fake_factory.calls == [("openai@eve.ink", 3)]
     assert fake_factory.configs[-1].base_url == "https://mail.boxmoe.eu.org/"
     assert fake_factory.configs[-1].api_token == "fixed-token-123"
+    assert fake_factory.configs[-1].internal_admin_email == "admin@example.com"
+    assert fake_factory.configs[-1].internal_admin_password == "secret"
 
 
 def test_public_pages_do_not_show_top_nav_buttons(tmp_path) -> None:
@@ -363,6 +369,78 @@ def test_mailbox_filters_shared_query_mailbox_by_detected_original_recipient(tmp
     assert "222222" in response.text
     assert "code-for-other" not in response.text
     assert "111111" not in response.text
+
+
+def test_mailbox_filters_shared_query_mailbox_by_recipient_json(tmp_path) -> None:
+    fake_cloudmail = FakeCloudMailClient(
+        messages=[
+            CloudMailMessage(
+                email_id=1,
+                send_email="noreply@tm.openai.com",
+                send_name="OpenAI",
+                subject="code-for-other-json",
+                to_email="openai@eve.ink",
+                to_name="",
+                create_time="2026-04-18 15:02:00",
+                type=0,
+                content="<div>330119</div>",
+                text="330119",
+                is_del=0,
+                recipient='[{"address":"other@example.com","name":"other"}]',
+            ),
+            CloudMailMessage(
+                email_id=2,
+                send_email="noreply@tm.openai.com",
+                send_name="OpenAI",
+                subject="code-for-target-json",
+                to_email="openai@eve.ink",
+                to_name="",
+                create_time="2026-04-18 15:03:00",
+                type=0,
+                content="<div>220022</div>",
+                text="220022",
+                is_del=0,
+                recipient='[{"address":"target@example.com","name":"target"}]',
+            ),
+        ]
+    )
+    settings = AppSettings(
+        app_secret_key="test-secret",
+        app_admin_username="admin",
+        app_admin_password="pass123",
+        database_path=str(tmp_path / "app.db"),
+        cloudmail_base_url="https://mail.example.com",
+        cloudmail_admin_email="admin@example.com",
+        cloudmail_admin_password="secret",
+        lookup_email_limit=5,
+    )
+    app = create_app(settings=settings, cloudmail_client=fake_cloudmail)
+    client = TestClient(app)
+
+    client.post(
+        "/admin/login",
+        data={"username": "admin", "password": "pass123"},
+        follow_redirects=True,
+    )
+    client.post(
+        "/admin/keys",
+        data={
+            "recipient_email": "target@example.com",
+            "query_email": "openai@eve.ink",
+            "access_key": "target-json-key",
+            "label": "target-json",
+        },
+        follow_redirects=True,
+    )
+
+    response = client.get("/mailbox/target-json-key")
+
+    assert response.status_code == 200
+    assert "code-for-target-json" in response.text
+    assert "220022" in response.text
+    assert "code-for-other-json" not in response.text
+    assert "330119" not in response.text
+
 
 
 def test_mailbox_hides_shared_query_mailbox_messages_when_original_recipient_cannot_be_determined(tmp_path) -> None:

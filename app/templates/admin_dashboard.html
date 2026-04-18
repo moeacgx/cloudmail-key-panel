@@ -5,7 +5,7 @@
   <div class="mailbox-header">
     <div>
       <h2>CloudMail 配置</h2>
-      <p>直接在后台填写 CloudMail 地址和固定 Token。保存后后续查询会优先使用这里的配置，不需要再去改 .env。</p>
+      <p>这里可以同时保存 public Token 和 CloudMail 管理员账号。填了管理员邮箱+密码后，面板会优先走内部接口读取 recipient 字段，才能真正按原始收件人精确筛选。</p>
     </div>
     <form method="post" action="/admin/logout">
       <button type="submit" class="secondary">退出登录</button>
@@ -25,8 +25,16 @@
       <input type="url" name="base_url" value="{{ cloudmail_config.base_url }}" placeholder="https://mail.boxmoe.eu.org/" required>
     </label>
     <label>
-      <span>固定 Token</span>
-      <input type="text" name="api_token" value="{{ cloudmail_config.api_token }}" placeholder="请输入固定 Token" required>
+      <span>固定 Token（可选）</span>
+      <input type="text" name="api_token" value="{{ cloudmail_config.api_token }}" placeholder="继续使用 public /api/public/emailList 时填写">
+    </label>
+    <label>
+      <span>CloudMail 管理员邮箱（可选）</span>
+      <input type="email" name="internal_admin_email" value="{{ cloudmail_config.internal_admin_email }}" placeholder="填写后优先走内部 /api/login + /api/allEmail/list">
+    </label>
+    <label>
+      <span>CloudMail 管理员密码（可选）</span>
+      <input type="password" name="internal_admin_password" value="{{ cloudmail_config.internal_admin_password }}" placeholder="和管理员邮箱一起填写">
     </label>
     <label>
       <span>默认 CloudMail 查询邮箱（可选）</span>

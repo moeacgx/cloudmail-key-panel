@@ -78,6 +78,8 @@ def test_key_store_persists_cloudmail_settings(tmp_path) -> None:
     saved = store.save_cloudmail_settings(
         base_url=" https://mail.boxmoe.eu.org/ ",
         api_token=" fixed-token-123 ",
+        internal_admin_email=" Admin@Example.com ",
+        internal_admin_password=" secret ",
         default_query_email=" OpenAI@eve.ink ",
         recent_email_limit=" 3 ",
     )
@@ -85,9 +87,13 @@ def test_key_store_persists_cloudmail_settings(tmp_path) -> None:
 
     assert saved.base_url == "https://mail.boxmoe.eu.org/"
     assert saved.api_token == "fixed-token-123"
+    assert saved.internal_admin_email == "admin@example.com"
+    assert saved.internal_admin_password == "secret"
     assert saved.default_query_email == "openai@eve.ink"
     assert saved.recent_email_limit == 3
     assert loaded.base_url == "https://mail.boxmoe.eu.org/"
     assert loaded.api_token == "fixed-token-123"
+    assert loaded.internal_admin_email == "admin@example.com"
+    assert loaded.internal_admin_password == "secret"
     assert loaded.default_query_email == "openai@eve.ink"
     assert loaded.recent_email_limit == 3

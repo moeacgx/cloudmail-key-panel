@@ -75,3 +75,68 @@ def test_cloudmail_client_uses_fixed_api_token_without_calling_gen_token() -> No
     emails = client.fetch_recent_emails("buyer@example.com")
 
     assert emails == []
+
+
+def test_cloudmail_client_uses_internal_login_and_all_email_list_for_precise_recipient_matching() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+
+        if request.url.path == "/api/login":
+            assert request.method == "POST"
+            assert request.read() == b'{"email":"admin@example.com","password":"secret"}'
+            return httpx.Response(
+                200,
+                json={"code": 200, "message": "success", "data": {"token": "jwt-123"}},
+            )
+
+        if request.url.path == "/api/allEmail/list":
+            assert request.method == "GET"
+            assert request.headers["Authorization"] == "jwt-123"
+            assert request.url.params["accountEmail"] == "openai@eve.ink"
+            assert request.url.params["type"] == "receive"
+            assert request.url.params["size"] == "3"
+            return httpx.Response(
+                200,
+                json={
+                    "code": 200,
+                    "message": "success",
+                    "data": {
+                        "list": [
+                            {
+                                "emailId": 99,
+                                "sendEmail": "noreply@tm.openai.com",
+                                "name": "OpenAI",
+                                "subject": "Your ChatGPT code is 330119",
+                                "toEmail": "openai@eve.ink",
+                                "toName": "buyer",
+                                "createTime": "2026-04-18 14:59:00",
+                                "type": 0,
+                                "content": "<div>330119</div>",
+                                "text": "330119",
+                                "recipient": '[{"address":"cranes_solute.1o@icloud.com","name":"buyer"}]',
+                                "isDel": 0,
+                            }
+                        ],
+                        "total": 1,
+                        "latestEmail": {"emailId": 99},
+                    },
+                },
+            )
+
+        raise AssertionError(f"unexpected path: {request.url.path}")
+
+    client = CloudMailClient(
+        base_url="https://mail.example.com",
+        internal_admin_email="admin@example.com",
+        internal_admin_password="secret",
+        transport=httpx.MockTransport(handler),
+    )
+
+    emails = client.fetch_recent_emails("openai@eve.ink", limit=3)
+
+    assert len(requests) == 2
+    assert emails[0].subject == "Your ChatGPT code is 330119"
+    assert emails[0].to_email == "openai@eve.ink"
+    assert emails[0].recipient == '[{"address":"cranes_solute.1o@icloud.com","name":"buyer"}]'

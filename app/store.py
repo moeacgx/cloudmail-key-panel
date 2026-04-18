@@ -21,6 +21,8 @@ class AccessMapping:
 class CloudMailSettingsRecord:
     base_url: str
     api_token: str
+    internal_admin_email: str
+    internal_admin_password: str
     default_query_email: str
     recent_email_limit: int
     updated_at: str
@@ -155,17 +157,23 @@ class KeyStore:
         self,
         base_url: str,
         api_token: str,
+        internal_admin_email: str = "",
+        internal_admin_password: str = "",
         default_query_email: str = "",
         recent_email_limit: int | str = 10,
     ) -> CloudMailSettingsRecord:
         normalized_base_url = base_url.strip()
         normalized_api_token = api_token.strip()
+        normalized_internal_admin_email = internal_admin_email.strip().lower()
+        normalized_internal_admin_password = internal_admin_password.strip()
         normalized_default_query_email = default_query_email.strip().lower()
 
         if not normalized_base_url:
             raise ValueError("base_url is required")
-        if not normalized_api_token:
-            raise ValueError("api_token is required")
+        if bool(normalized_internal_admin_email) != bool(normalized_internal_admin_password):
+            raise ValueError("internal_admin_credentials incomplete")
+        if not normalized_api_token and not (normalized_internal_admin_email and normalized_internal_admin_password):
+            raise ValueError("cloudmail_auth is required")
 
         normalized_recent_email_limit = self._normalize_recent_email_limit(recent_email_limit)
         updated_at = self._now()
@@ -180,6 +188,8 @@ class KeyStore:
                 [
                     ("cloudmail_base_url", normalized_base_url, updated_at),
                     ("cloudmail_api_token", normalized_api_token, updated_at),
+                    ("cloudmail_internal_admin_email", normalized_internal_admin_email, updated_at),
+                    ("cloudmail_internal_admin_password", normalized_internal_admin_password, updated_at),
                     ("default_query_email", normalized_default_query_email, updated_at),
                     ("recent_email_limit", str(normalized_recent_email_limit), updated_at),
                 ],
@@ -189,6 +199,8 @@ class KeyStore:
         return CloudMailSettingsRecord(
             base_url=normalized_base_url,
             api_token=normalized_api_token,
+            internal_admin_email=normalized_internal_admin_email,
+            internal_admin_password=normalized_internal_admin_password,
             default_query_email=normalized_default_query_email,
             recent_email_limit=normalized_recent_email_limit,
             updated_at=updated_at,
@@ -198,17 +210,21 @@ class KeyStore:
         self,
         default_base_url: str = "",
         default_api_token: str = "",
+        default_internal_admin_email: str = "",
+        default_internal_admin_password: str = "",
         default_query_email: str = "",
         default_recent_email_limit: int = 10,
     ) -> CloudMailSettingsRecord:
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT key, value, updated_at FROM app_settings WHERE key IN ('cloudmail_base_url', 'cloudmail_api_token', 'default_query_email', 'recent_email_limit')"
+                "SELECT key, value, updated_at FROM app_settings WHERE key IN ('cloudmail_base_url', 'cloudmail_api_token', 'cloudmail_internal_admin_email', 'cloudmail_internal_admin_password', 'default_query_email', 'recent_email_limit')"
             ).fetchall()
 
         values = {
             "cloudmail_base_url": default_base_url,
             "cloudmail_api_token": default_api_token,
+            "cloudmail_internal_admin_email": default_internal_admin_email,
+            "cloudmail_internal_admin_password": default_internal_admin_password,
             "default_query_email": default_query_email,
             "recent_email_limit": str(default_recent_email_limit),
         }
@@ -221,6 +237,8 @@ class KeyStore:
         return CloudMailSettingsRecord(
             base_url=values["cloudmail_base_url"],
             api_token=values["cloudmail_api_token"],
+            internal_admin_email=values["cloudmail_internal_admin_email"],
+            internal_admin_password=values["cloudmail_internal_admin_password"],
             default_query_email=values["default_query_email"],
             recent_email_limit=self._normalize_recent_email_limit(values["recent_email_limit"]),
             updated_at=updated_at,

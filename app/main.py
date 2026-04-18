@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,6 +37,8 @@ class ResolvedCloudMailConfig:
     api_token: str | None = None
     admin_email: str | None = None
     admin_password: str | None = None
+    internal_admin_email: str | None = None
+    internal_admin_password: str | None = None
 
 
 def create_app(
@@ -146,7 +149,9 @@ def create_app(
     def admin_save_cloudmail_settings(
         request: Request,
         base_url: str = Form(...),
-        api_token: str = Form(...),
+        api_token: str = Form(""),
+        internal_admin_email: str = Form(""),
+        internal_admin_password: str = Form(""),
         default_query_email: str = Form(""),
         recent_email_limit: str = Form(...),
     ) -> Response:
@@ -157,6 +162,8 @@ def create_app(
             request.app.state.store.save_cloudmail_settings(
                 base_url=base_url,
                 api_token=api_token,
+                internal_admin_email=internal_admin_email,
+                internal_admin_password=internal_admin_password,
                 default_query_email=default_query_email,
                 recent_email_limit=recent_email_limit,
             )
@@ -264,6 +271,8 @@ def _get_cloudmail_settings_for_display(request: Request) -> CloudMailSettingsRe
     return request.app.state.store.get_cloudmail_settings(
         default_base_url=settings.cloudmail_base_url,
         default_api_token=settings.cloudmail_api_token or "",
+        default_internal_admin_email=settings.cloudmail_internal_admin_email,
+        default_internal_admin_password=settings.cloudmail_internal_admin_password,
         default_recent_email_limit=settings.lookup_email_limit,
     )
 
@@ -276,6 +285,8 @@ def _resolve_cloudmail_config(request: Request) -> ResolvedCloudMailConfig:
         api_token=saved.api_token or None,
         admin_email=settings.cloudmail_admin_email or None,
         admin_password=settings.cloudmail_admin_password or None,
+        internal_admin_email=saved.internal_admin_email or None,
+        internal_admin_password=saved.internal_admin_password or None,
     )
 
 
@@ -295,8 +306,10 @@ def _get_cloudmail_client(request: Request) -> Any:
     config = _resolve_cloudmail_config(request)
     if not config.base_url:
         raise CloudMailError("请先在后台填写 CloudMail 地址")
-    if not config.api_token and not (config.admin_email and config.admin_password):
-        raise CloudMailError("请先在后台填写 CloudMail Token")
+    has_internal_login = bool(config.internal_admin_email and config.internal_admin_password)
+    has_public_access = bool(config.api_token or (config.admin_email and config.admin_password))
+    if not has_internal_login and not has_public_access:
+        raise CloudMailError("请先填写固定 Token，或填写 CloudMail 管理员邮箱和密码")
 
     if request.app.state.cloudmail_client_factory is not None:
         return request.app.state.cloudmail_client_factory(config)
@@ -306,6 +319,8 @@ def _get_cloudmail_client(request: Request) -> Any:
         admin_email=config.admin_email,
         admin_password=config.admin_password,
         api_token=config.api_token,
+        internal_admin_email=config.internal_admin_email,
+        internal_admin_password=config.internal_admin_password,
     )
 
 
@@ -318,6 +333,8 @@ def _translate_store_error(message: str) -> str:
         "mapping not found": "这个 Key 记录不存在或已被删除",
         "base_url is required": "CloudMail 地址不能为空",
         "api_token is required": "CloudMail Token 不能为空",
+        "cloudmail_auth is required": "固定 Token 和管理员邮箱密码至少填一种",
+        "internal_admin_credentials incomplete": "管理员邮箱和密码要么都填，要么都留空",
         "recent_email_limit must be a positive integer": "最新邮件数量必须是大于 0 的整数",
     }
     return mapping.get(message, message)
@@ -374,6 +391,19 @@ def _filter_emails_for_mapping(
 
 def _extract_original_recipients(message: Any) -> list[str]:
     candidates: set[str] = set()
+
+    raw_recipient = getattr(message, "recipient", "") or ""
+    if raw_recipient:
+        try:
+            recipient_items = json.loads(raw_recipient)
+        except json.JSONDecodeError:
+            recipient_items = []
+        for item in recipient_items:
+            if isinstance(item, dict):
+                address = str(item.get("address", "")).strip().lower()
+                if address:
+                    candidates.add(address)
+
     searchable_parts = [
         message.subject or "",
         message.text or "",
