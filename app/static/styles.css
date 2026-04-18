@@ -36,6 +36,11 @@ body {
   margin-bottom: 24px;
 }
 
+.site-header.centered-header {
+  justify-content: center;
+  text-align: center;
+}
+
 .site-header h1 {
   margin: 0 0 8px;
 }
@@ -73,6 +78,8 @@ button:hover,
 
 .narrow-card {
   max-width: 520px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .stack-form {
@@ -196,6 +203,47 @@ button,
   border-radius: 12px;
   padding: 14px;
   line-height: 1.6;
+}
+
+.mapping-list {
+  display: grid;
+  gap: 16px;
+}
+
+.mapping-card {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+  background: #fcfcfd;
+}
+
+.mapping-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.mapping-meta {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.action-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.danger {
+  background: var(--danger);
+}
+
+.danger:hover {
+  background: #b91c1c;
 }
 
 .table-wrap {

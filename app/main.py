@@ -51,13 +51,18 @@ def create_app(
 
     @app.get("/", response_class=HTMLResponse)
     def home(request: Request) -> HTMLResponse:
-        return _render(request, "index.html", {"error": None})
+        return _render(request, "index.html", {"error": None, "header_centered": True})
 
     @app.post("/lookup")
     def lookup(request: Request, access_key: str = Form(...)) -> Response:
         key = access_key.strip()
         if not key:
-            return _render(request, "index.html", {"error": "请输入查看 Key"}, status_code=status.HTTP_400_BAD_REQUEST)
+            return _render(
+                request,
+                "index.html",
+                {"error": "请输入查看 Key", "header_centered": True},
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
         return RedirectResponse(url=f"/mailbox/{key}", status_code=status.HTTP_303_SEE_OTHER)
 
     @app.get("/mailbox/{access_key}", response_class=HTMLResponse)
@@ -73,7 +78,7 @@ def create_app(
 
         try:
             emails = _get_cloudmail_client(request).fetch_recent_emails(
-                mapping.recipient_email,
+                mapping.query_email,
                 limit=request.app.state.settings.lookup_email_limit,
             )
         except CloudMailError as exc:
@@ -145,6 +150,7 @@ def create_app(
     def admin_create_key(
         request: Request,
         recipient_email: str = Form(...),
+        query_email: str = Form(""),
         access_key: str = Form(""),
         label: str = Form(""),
     ) -> Response:
@@ -154,6 +160,7 @@ def create_app(
         try:
             request.app.state.store.create_mapping(
                 recipient_email=recipient_email,
+                query_email=query_email or None,
                 access_key=access_key or None,
                 label=label,
             )
@@ -161,6 +168,43 @@ def create_app(
             return _render_admin_dashboard(request, error=_translate_store_error(str(exc)), status_code=status.HTTP_400_BAD_REQUEST)
 
         return RedirectResponse(url="/admin", status_code=status.HTTP_303_SEE_OTHER)
+
+    @app.post("/admin/keys/{mapping_id}/update")
+    def admin_update_key(
+        request: Request,
+        mapping_id: int,
+        recipient_email: str = Form(...),
+        query_email: str = Form(""),
+        access_key: str = Form(...),
+        label: str = Form(""),
+    ) -> Response:
+        if not _is_admin(request):
+            return RedirectResponse(url="/admin/login", status_code=status.HTTP_303_SEE_OTHER)
+
+        try:
+            request.app.state.store.update_mapping(
+                mapping_id=mapping_id,
+                recipient_email=recipient_email,
+                query_email=query_email or None,
+                access_key=access_key,
+                label=label,
+            )
+        except ValueError as exc:
+            return _render_admin_dashboard(request, error=_translate_store_error(str(exc)), status_code=status.HTTP_400_BAD_REQUEST)
+
+        return _render_admin_dashboard(request, message="Key 已更新")
+
+    @app.post("/admin/keys/{mapping_id}/delete")
+    def admin_delete_key(request: Request, mapping_id: int) -> Response:
+        if not _is_admin(request):
+            return RedirectResponse(url="/admin/login", status_code=status.HTTP_303_SEE_OTHER)
+
+        try:
+            request.app.state.store.delete_mapping(mapping_id)
+        except ValueError as exc:
+            return _render_admin_dashboard(request, error=_translate_store_error(str(exc)), status_code=status.HTTP_400_BAD_REQUEST)
+
+        return _render_admin_dashboard(request, message="Key 已删除")
 
     @app.post("/admin/logout")
     def admin_logout(request: Request) -> RedirectResponse:
@@ -239,8 +283,10 @@ def _get_cloudmail_client(request: Request) -> Any:
 def _translate_store_error(message: str) -> str:
     mapping = {
         "recipient_email is required": "原始收件人邮箱不能为空",
+        "query_email is required": "CloudMail 查询邮箱不能为空",
         "access_key is required": "查看 Key 不能为空",
         "access_key already exists": "这个查看 Key 已经存在",
+        "mapping not found": "这个 Key 记录不存在或已被删除",
         "base_url is required": "CloudMail 地址不能为空",
         "api_token is required": "CloudMail Token 不能为空",
     }

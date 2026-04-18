@@ -86,6 +86,7 @@ def test_admin_can_create_mapping_and_public_lookup_shows_recent_codes(tmp_path)
         "/admin/keys",
         data={
             "recipient_email": "cranes_solute.1o@icloud.com",
+            "query_email": "openai@eve.ink",
             "access_key": "demo-key-001",
             "label": "order-1",
         },
@@ -105,7 +106,7 @@ def test_admin_can_create_mapping_and_public_lookup_shows_recent_codes(tmp_path)
     assert "330119" in lookup_response.text
     assert "noreply@tm.openai.com" in lookup_response.text
     assert "cranes_solute.1o@icloud.com" in lookup_response.text
-    assert fake_cloudmail.calls == [("cranes_solute.1o@icloud.com", 5)]
+    assert fake_cloudmail.calls == [("openai@eve.ink", 5)]
 
 
 
@@ -146,6 +147,7 @@ def test_admin_can_save_cloudmail_settings_and_lookup_uses_saved_token(tmp_path)
         "/admin/keys",
         data={
             "recipient_email": "buyer@example.com",
+            "query_email": "openai@eve.ink",
             "access_key": "buyer-key-1",
             "label": "buyer-order",
         },
@@ -158,7 +160,7 @@ def test_admin_can_save_cloudmail_settings_and_lookup_uses_saved_token(tmp_path)
     )
 
     assert lookup_response.status_code == 200
-    assert fake_factory.calls == [("buyer@example.com", 5)]
+    assert fake_factory.calls == [("openai@eve.ink", 5)]
     assert fake_factory.configs[-1].base_url == "https://mail.boxmoe.eu.org/"
     assert fake_factory.configs[-1].api_token == "fixed-token-123"
 
@@ -187,6 +189,7 @@ def test_public_pages_do_not_show_top_nav_buttons(tmp_path) -> None:
         "/admin/keys",
         data={
             "recipient_email": "buyer@example.com",
+            "query_email": "openai@eve.ink",
             "access_key": "buyer-key-1",
             "label": "buyer-order",
         },
@@ -199,3 +202,71 @@ def test_public_pages_do_not_show_top_nav_buttons(tmp_path) -> None:
     for page in (home_response.text, mailbox_response.text):
         assert "前台查询" not in page
         assert "后台管理" not in page
+
+    assert "site-header centered-header" in home_response.text
+
+
+def test_admin_can_edit_and_delete_key(tmp_path) -> None:
+    fake_cloudmail = FakeCloudMailClient()
+    settings = AppSettings(
+        app_secret_key="test-secret",
+        app_admin_username="admin",
+        app_admin_password="pass123",
+        database_path=str(tmp_path / "app.db"),
+        cloudmail_base_url="https://mail.example.com",
+        cloudmail_admin_email="admin@example.com",
+        cloudmail_admin_password="secret",
+        lookup_email_limit=5,
+    )
+    app = create_app(settings=settings, cloudmail_client=fake_cloudmail)
+    client = TestClient(app)
+
+    client.post(
+        "/admin/login",
+        data={"username": "admin", "password": "pass123"},
+        follow_redirects=True,
+    )
+    create_response = client.post(
+        "/admin/keys",
+        data={
+            "recipient_email": "buyer@example.com",
+            "query_email": "openai@eve.ink",
+            "access_key": "buyer-key-1",
+            "label": "buyer-order",
+        },
+        follow_redirects=True,
+    )
+    assert "buyer-key-1" in create_response.text
+
+    edit_response = client.post(
+        "/admin/keys/1/update",
+        data={
+            "recipient_email": "buyer2@example.com",
+            "query_email": "mail@eve.ink",
+            "access_key": "buyer-key-2",
+            "label": "buyer-order-2",
+        },
+        follow_redirects=True,
+    )
+    assert edit_response.status_code == 200
+    assert "buyer-key-2" in edit_response.text
+    assert "buyer2@example.com" in edit_response.text
+    assert "mail@eve.ink" in edit_response.text
+
+    lookup_response = client.post(
+        "/lookup",
+        data={"access_key": "buyer-key-2"},
+        follow_redirects=True,
+    )
+    assert lookup_response.status_code == 200
+    assert fake_cloudmail.calls[-1] == ("mail@eve.ink", 5)
+
+    delete_response = client.post(
+        "/admin/keys/1/delete",
+        follow_redirects=True,
+    )
+    assert delete_response.status_code == 200
+    assert "buyer-key-2" not in delete_response.text
+
+    missing_lookup = client.get("/mailbox/buyer-key-2")
+    assert missing_lookup.status_code == 404

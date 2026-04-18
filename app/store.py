@@ -11,6 +11,7 @@ from pathlib import Path
 class AccessMapping:
     id: int
     recipient_email: str
+    query_email: str
     access_key: str
     label: str
     created_at: str
@@ -29,26 +30,35 @@ class KeyStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
-    def create_mapping(self, recipient_email: str, access_key: str | None = None, label: str = "") -> AccessMapping:
+    def create_mapping(
+        self,
+        recipient_email: str,
+        query_email: str | None = None,
+        access_key: str | None = None,
+        label: str = "",
+    ) -> AccessMapping:
         normalized_email = recipient_email.strip().lower()
+        normalized_query_email = (query_email or normalized_email).strip().lower()
         normalized_key = (access_key or self._generate_key()).strip()
         normalized_label = label.strip()
 
         if not normalized_email:
             raise ValueError("recipient_email is required")
+        if not normalized_query_email:
+            raise ValueError("query_email is required")
         if not normalized_key:
             raise ValueError("access_key is required")
 
-        created_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        created_at = self._now()
 
         try:
             with self._connect() as connection:
                 cursor = connection.execute(
                     """
-                    INSERT INTO access_mappings (recipient_email, access_key, label, created_at)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO access_mappings (recipient_email, query_email, access_key, label, created_at)
+                    VALUES (?, ?, ?, ?, ?)
                     """,
-                    (normalized_email, normalized_key, normalized_label, created_at),
+                    (normalized_email, normalized_query_email, normalized_key, normalized_label, created_at),
                 )
                 connection.commit()
         except sqlite3.IntegrityError as exc:
@@ -57,15 +67,75 @@ class KeyStore:
         return AccessMapping(
             id=int(cursor.lastrowid),
             recipient_email=normalized_email,
+            query_email=normalized_query_email,
             access_key=normalized_key,
             label=normalized_label,
             created_at=created_at,
         )
 
+    def update_mapping(
+        self,
+        mapping_id: int,
+        recipient_email: str,
+        query_email: str | None,
+        access_key: str,
+        label: str = "",
+    ) -> AccessMapping:
+        normalized_email = recipient_email.strip().lower()
+        normalized_query_email = (query_email or normalized_email).strip().lower()
+        normalized_key = access_key.strip()
+        normalized_label = label.strip()
+
+        if not normalized_email:
+            raise ValueError("recipient_email is required")
+        if not normalized_query_email:
+            raise ValueError("query_email is required")
+        if not normalized_key:
+            raise ValueError("access_key is required")
+
+        try:
+            with self._connect() as connection:
+                cursor = connection.execute(
+                    """
+                    UPDATE access_mappings
+                    SET recipient_email = ?, query_email = ?, access_key = ?, label = ?
+                    WHERE id = ?
+                    """,
+                    (normalized_email, normalized_query_email, normalized_key, normalized_label, mapping_id),
+                )
+                connection.commit()
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("access_key already exists") from exc
+
+        if cursor.rowcount == 0:
+            raise ValueError("mapping not found")
+
+        updated = self.get_by_id(mapping_id)
+        if updated is None:
+            raise ValueError("mapping not found")
+        return updated
+
+    def delete_mapping(self, mapping_id: int) -> None:
+        with self._connect() as connection:
+            cursor = connection.execute("DELETE FROM access_mappings WHERE id = ?", (mapping_id,))
+            connection.commit()
+
+        if cursor.rowcount == 0:
+            raise ValueError("mapping not found")
+
+    def get_by_id(self, mapping_id: int) -> AccessMapping | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT id, recipient_email, query_email, access_key, label, created_at FROM access_mappings WHERE id = ?",
+                (mapping_id,),
+            ).fetchone()
+
+        return self._row_to_mapping(row)
+
     def get_by_key(self, access_key: str) -> AccessMapping | None:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT id, recipient_email, access_key, label, created_at FROM access_mappings WHERE access_key = ?",
+                "SELECT id, recipient_email, query_email, access_key, label, created_at FROM access_mappings WHERE access_key = ?",
                 (access_key.strip(),),
             ).fetchone()
 
@@ -74,7 +144,7 @@ class KeyStore:
     def list_mappings(self) -> list[AccessMapping]:
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT id, recipient_email, access_key, label, created_at FROM access_mappings ORDER BY id DESC"
+                "SELECT id, recipient_email, query_email, access_key, label, created_at FROM access_mappings ORDER BY id DESC"
             ).fetchall()
 
         return [mapping for row in rows if (mapping := self._row_to_mapping(row)) is not None]
@@ -88,7 +158,7 @@ class KeyStore:
         if not normalized_api_token:
             raise ValueError("api_token is required")
 
-        updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        updated_at = self._now()
 
         with self._connect() as connection:
             connection.executemany(
@@ -143,6 +213,7 @@ class KeyStore:
                 CREATE TABLE IF NOT EXISTS access_mappings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     recipient_email TEXT NOT NULL,
+                    query_email TEXT NOT NULL DEFAULT '',
                     access_key TEXT NOT NULL UNIQUE,
                     label TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL
@@ -158,6 +229,17 @@ class KeyStore:
                 )
                 """
             )
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(access_mappings)").fetchall()
+            }
+            if "query_email" not in columns:
+                connection.execute(
+                    "ALTER TABLE access_mappings ADD COLUMN query_email TEXT NOT NULL DEFAULT ''"
+                )
+            connection.execute(
+                "UPDATE access_mappings SET query_email = recipient_email WHERE query_email = '' OR query_email IS NULL"
+            )
             connection.commit()
 
     def _connect(self) -> sqlite3.Connection:
@@ -170,12 +252,17 @@ class KeyStore:
         return secrets.token_urlsafe(12)
 
     @staticmethod
+    def _now() -> str:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+    @staticmethod
     def _row_to_mapping(row: sqlite3.Row | None) -> AccessMapping | None:
         if row is None:
             return None
         return AccessMapping(
             id=row["id"],
             recipient_email=row["recipient_email"],
+            query_email=row["query_email"],
             access_key=row["access_key"],
             label=row["label"],
             created_at=row["created_at"],

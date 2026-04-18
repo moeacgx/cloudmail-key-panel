@@ -8,7 +8,7 @@
 </head>
 <body>
   <div class="page-shell">
-    <header class="site-header">
+    <header class="site-header{% if header_centered %} centered-header{% endif %}">
       <div>
         <h1>{{ settings.app_name }}</h1>
         <p>按原始收件人邮箱绑定 Key，前台凭 Key 查看最近验证码邮件。</p>

@@ -36,7 +36,7 @@
   <div class="mailbox-header">
     <div>
       <h2>创建查看 Key</h2>
-      <p>绑定原始收件人邮箱（To / 收件人），前台用户凭 Key 查看最近验证码邮件。</p>
+      <p>原始收件人邮箱是前台展示给用户看的邮箱；CloudMail 查询邮箱则是实际调用 CloudMail API 用的收件地址。</p>
     </div>
   </div>
 
@@ -44,6 +44,10 @@
     <label>
       <span>原始收件人邮箱</span>
       <input type="email" name="recipient_email" placeholder="cranes_solute.1o@icloud.com" required>
+    </label>
+    <label>
+      <span>CloudMail 查询邮箱</span>
+      <input type="email" name="query_email" placeholder="例如：openai@eve.ink；留空则默认等于原始收件人邮箱">
     </label>
     <label>
       <span>自定义 Key（可选）</span>
@@ -60,31 +64,42 @@
 <section class="card">
   <h2>已创建的 Key</h2>
   {% if mappings %}
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Key</th>
-            <th>收件人邮箱</th>
-            <th>备注</th>
-            <th>创建时间</th>
-            <th>前台链接</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for item in mappings %}
-            <tr>
-              <td>{{ item.id }}</td>
-              <td><code>{{ item.access_key }}</code></td>
-              <td>{{ item.recipient_email }}</td>
-              <td>{{ item.label or '-' }}</td>
-              <td>{{ item.created_at }}</td>
-              <td><a href="/mailbox/{{ item.access_key }}" target="_blank">打开</a></td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+    <div class="mapping-list">
+      {% for item in mappings %}
+        <article class="mapping-card">
+          <form method="post" action="/admin/keys/{{ item.id }}/update" class="stack-form">
+            <div class="mapping-grid">
+              <label>
+                <span>原始收件人邮箱</span>
+                <input type="email" name="recipient_email" value="{{ item.recipient_email }}" required>
+              </label>
+              <label>
+                <span>CloudMail 查询邮箱</span>
+                <input type="email" name="query_email" value="{{ item.query_email }}" required>
+              </label>
+              <label>
+                <span>查看 Key</span>
+                <input type="text" name="access_key" value="{{ item.access_key }}" required>
+              </label>
+              <label>
+                <span>备注</span>
+                <input type="text" name="label" value="{{ item.label }}" placeholder="例如订单号 / 商品名">
+              </label>
+            </div>
+            <div class="mapping-meta">
+              <span>ID：{{ item.id }}</span>
+              <span>创建时间：{{ item.created_at }}</span>
+            </div>
+            <div class="action-row">
+              <a class="button secondary" href="/mailbox/{{ item.access_key }}" target="_blank">打开前台</a>
+              <button type="submit">保存修改</button>
+            </div>
+          </form>
+          <form method="post" action="/admin/keys/{{ item.id }}/delete">
+            <button type="submit" class="danger">删除这个 Key</button>
+          </form>
+        </article>
+      {% endfor %}
     </div>
   {% else %}
     <div class="alert">暂时还没有 Key。</div>
