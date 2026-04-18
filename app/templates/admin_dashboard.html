@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="card">
+  <div class="mailbox-header">
+    <div>
+      <h2>创建查看 Key</h2>
+      <p>绑定原始收件人邮箱（To / 收件人），前台用户凭 Key 查看最近验证码邮件。</p>
+    </div>
+    <form method="post" action="/admin/logout">
+      <button type="submit" class="secondary">退出登录</button>
+    </form>
+  </div>
+
+  {% if error %}
+    <div class="alert error">{{ error }}</div>
+  {% endif %}
+
+  <form method="post" action="/admin/keys" class="stack-form">
+    <label>
+      <span>原始收件人邮箱</span>
+      <input type="email" name="recipient_email" placeholder="cranes_solute.1o@icloud.com" required>
+    </label>
+    <label>
+      <span>自定义 Key（可选）</span>
+      <input type="text" name="access_key" placeholder="留空则自动生成">
+    </label>
+    <label>
+      <span>备注（可选）</span>
+      <input type="text" name="label" placeholder="例如订单号 / 商品名">
+    </label>
+    <button type="submit">生成并保存</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>已创建的 Key</h2>
+  {% if mappings %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Key</th>
+            <th>收件人邮箱</th>
+            <th>备注</th>
+            <th>创建时间</th>
+            <th>前台链接</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in mappings %}
+            <tr>
+              <td>{{ item.id }}</td>
+              <td><code>{{ item.access_key }}</code></td>
+              <td>{{ item.recipient_email }}</td>
+              <td>{{ item.label or '-' }}</td>
+              <td>{{ item.created_at }}</td>
+              <td><a href="/mailbox/{{ item.access_key }}" target="_blank">打开</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="alert">暂时还没有 Key。</div>
+  {% endif %}
+</section>
+{% endblock %}

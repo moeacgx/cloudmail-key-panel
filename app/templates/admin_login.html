@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="card narrow-card">
+  <h2>后台登录</h2>
+  {% if error %}
+    <div class="alert error">{{ error }}</div>
+  {% endif %}
+  <form method="post" action="/admin/login" class="stack-form">
+    <label>
+      <span>用户名</span>
+      <input type="text" name="username" required>
+    </label>
+    <label>
+      <span>密码</span>
+      <input type="password" name="password" required>
+    </label>
+    <button type="submit">登录后台</button>
+  </form>
+</section>
+{% endblock %}

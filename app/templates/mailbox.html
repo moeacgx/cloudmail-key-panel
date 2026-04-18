@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="card">
+  {% if error %}
+    <div class="alert error">{{ error }}</div>
+  {% else %}
+    <div class="mailbox-header">
+      <div>
+        <h2>最近验证码邮件</h2>
+        <p>当前收件人：<strong>{{ mapping.recipient_email }}</strong></p>
+        <p>查看 Key：<code>{{ mapping.access_key }}</code></p>
+      </div>
+      <a class="button secondary" href="/">重新输入 Key</a>
+    </div>
+
+    {% if emails %}
+      <div class="mail-grid">
+        {% for item in emails %}
+          <article class="mail-card">
+            <div class="mail-topline">
+              <h3>{{ item.message.subject or '无主题' }}</h3>
+              <span>{{ item.message.create_time }}</span>
+            </div>
+            <p class="meta">发件人：{{ item.message.send_name or '未知' }} &lt;{{ item.message.send_email or '未知' }}&gt;</p>
+            <p class="meta">收件人：{{ item.message.to_email }}</p>
+
+            <div class="code-list">
+              {% if item.codes %}
+                {% for code in item.codes %}
+                  <span class="code-chip">{{ code }}</span>
+                {% endfor %}
+              {% else %}
+                <span class="code-chip muted">未提取到明显验证码</span>
+              {% endif %}
+            </div>
+
+            <div class="preview-box">
+              {{ item.preview }}
+            </div>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="alert">当前没有查到邮件。</div>
+    {% endif %}
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="card narrow-card">
+  <h2>输入查看 Key</h2>
+  <p>输入后台发放的 Key，直接查看这个收件人邮箱最近收到的验证码邮件。</p>
+
+  {% if error %}
+    <div class="alert error">{{ error }}</div>
+  {% endif %}
+
+  <form method="post" action="/lookup" class="stack-form">
+    <label>
+      <span>查看 Key</span>
+      <input type="text" name="access_key" placeholder="例如：demo-key-001" required>
+    </label>
+    <button type="submit">立即查看</button>
+  </form>
+</section>
+{% endblock %}
