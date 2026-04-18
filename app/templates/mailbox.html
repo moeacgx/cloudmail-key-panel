@@ -8,11 +8,16 @@
     <div class="mailbox-header">
       <div>
         <h2>最近验证码邮件</h2>
-        <p>当前收件人：<strong>{{ mapping.recipient_email }}</strong></p>
+        <p>当前原始收件人：<strong>{{ mapping.recipient_email }}</strong></p>
+        <p>CloudMail 查询邮箱：<code>{{ mapping.query_email }}</code></p>
         <p>查看 Key：<code>{{ mapping.access_key }}</code></p>
       </div>
       <a class="button secondary" href="/">重新输入 Key</a>
     </div>
+
+    {% if notice %}
+      <div class="alert">{{ notice }}</div>
+    {% endif %}
 
     {% if emails %}
       <div class="mail-grid">
@@ -23,7 +28,10 @@
               <span>{{ item.message.create_time }}</span>
             </div>
             <p class="meta">发件人：{{ item.message.send_name or '未知' }} &lt;{{ item.message.send_email or '未知' }}&gt;</p>
-            <p class="meta">收件人：{{ item.message.to_email }}</p>
+            <p class="meta">CloudMail 查询邮箱：{{ item.message.to_email }}</p>
+            {% if item.detected_recipients %}
+              <p class="meta">识别到的原始收件人：{{ item.detected_recipients | join('、') }}</p>
+            {% endif %}
 
             <div class="code-list">
               {% if item.codes %}

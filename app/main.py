@@ -19,6 +19,13 @@ from app.store import CloudMailSettingsRecord, KeyStore
 
 _TAG_PATTERN = re.compile(r"<[^>]+>")
 _WHITESPACE_PATTERN = re.compile(r"\s+")
+_EMAIL_PATTERN = r"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}"
+_ORIGINAL_RECIPIENT_PATTERNS = [
+    re.compile(
+        rf"(?:收件人|收件邮箱|收件地址|Recipient|Original Recipient|Original-Recipient|Final-Recipient|Delivered-To|X-Original-To|To)\s*[:：]\s*[<\"']?({_EMAIL_PATTERN})",
+        re.IGNORECASE,
+    ),
+]
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
@@ -89,18 +96,21 @@ def create_app(
                 status_code=status.HTTP_502_BAD_GATEWAY,
             )
 
+        filtered_emails, notice = _filter_emails_for_mapping(mapping.recipient_email, mapping.query_email, emails)
+
         rendered_emails = [
             {
                 "message": email,
                 "codes": extract_verification_codes(email.subject, email.text, email.content),
                 "preview": _build_preview(email.text, email.content),
+                "detected_recipients": detected_recipients,
             }
-            for email in emails
+            for email, detected_recipients in filtered_emails
         ]
         return _render(
             request,
             "mailbox.html",
-            {"mapping": mapping, "emails": rendered_emails, "error": None},
+            {"mapping": mapping, "emails": rendered_emails, "error": None, "notice": notice},
         )
 
     @app.get("/admin/login", response_class=HTMLResponse)
@@ -324,6 +334,53 @@ def _build_preview(text_value: str, html_value: str) -> str:
         return text
     stripped = _TAG_PATTERN.sub(" ", html_value or "")
     return _WHITESPACE_PATTERN.sub(" ", stripped).strip()
+
+
+def _filter_emails_for_mapping(
+    recipient_email: str,
+    query_email: str,
+    emails: list[Any],
+) -> tuple[list[tuple[Any, list[str]]], str | None]:
+    normalized_recipient_email = recipient_email.strip().lower()
+    normalized_query_email = query_email.strip().lower()
+
+    if normalized_recipient_email == normalized_query_email:
+        return [(email, _extract_original_recipients(email)) for email in emails], None
+
+    filtered: list[tuple[Any, list[str]]] = []
+    detected_any = False
+
+    for email in emails:
+        detected_recipients = _extract_original_recipients(email)
+        if detected_recipients:
+            detected_any = True
+        if normalized_recipient_email in detected_recipients:
+            filtered.append((email, detected_recipients))
+
+    if filtered:
+        return filtered, None
+    if not emails:
+        return [], None
+    if detected_any:
+        return [], "当前 CloudMail 查询邮箱下有邮件，但识别到的原始收件人都不匹配这个 Key。"
+    return [], "当前 CloudMail 查询邮箱下有邮件，但无法从 CloudMail 返回内容里识别原始收件人，所以没有直接展示共享查询邮箱里的混合邮件。"
+
+
+def _extract_original_recipients(message: Any) -> list[str]:
+    candidates: set[str] = set()
+    searchable_parts = [
+        message.subject or "",
+        message.text or "",
+        _TAG_PATTERN.sub(" ", message.content or ""),
+    ]
+
+    for part in searchable_parts:
+        normalized = _WHITESPACE_PATTERN.sub(" ", part)
+        for pattern in _ORIGINAL_RECIPIENT_PATTERNS:
+            for match in pattern.finditer(normalized):
+                candidates.add(match.group(1).strip().lower())
+
+    return sorted(candidates)
 
 
 app = create_app()

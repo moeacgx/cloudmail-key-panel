@@ -6,18 +6,15 @@ from app.settings import AppSettings
 
 
 class FakeCloudMailClient:
-    def __init__(self) -> None:
+    def __init__(self, messages: list[CloudMailMessage] | None = None) -> None:
         self.calls: list[tuple[str, int]] = []
-
-    def fetch_recent_emails(self, recipient_email: str, limit: int = 10) -> list[CloudMailMessage]:
-        self.calls.append((recipient_email, limit))
-        return [
+        self.messages = messages or [
             CloudMailMessage(
                 email_id=1,
                 send_email="noreply@tm.openai.com",
                 send_name="OpenAI",
                 subject="Your ChatGPT code is 330119",
-                to_email=recipient_email,
+                to_email="",
                 to_name="buyer",
                 create_time="2026-04-18 14:59:00",
                 type=0,
@@ -25,6 +22,25 @@ class FakeCloudMailClient:
                 text="ChatGPT Log-in Code\n330119",
                 is_del=0,
             )
+        ]
+
+    def fetch_recent_emails(self, recipient_email: str, limit: int = 10) -> list[CloudMailMessage]:
+        self.calls.append((recipient_email, limit))
+        return [
+            CloudMailMessage(
+                email_id=message.email_id,
+                send_email=message.send_email,
+                send_name=message.send_name,
+                subject=message.subject,
+                to_email=message.to_email or recipient_email,
+                to_name=message.to_name,
+                create_time=message.create_time,
+                type=message.type,
+                content=message.content,
+                text=message.text,
+                is_del=message.is_del,
+            )
+            for message in self.messages[:limit]
         ]
 
 
@@ -86,7 +102,7 @@ def test_admin_can_create_mapping_and_public_lookup_shows_recent_codes(tmp_path)
         "/admin/keys",
         data={
             "recipient_email": "cranes_solute.1o@icloud.com",
-            "query_email": "openai@eve.ink",
+            "query_email": "cranes_solute.1o@icloud.com",
             "access_key": "demo-key-001",
             "label": "order-1",
         },
@@ -106,7 +122,7 @@ def test_admin_can_create_mapping_and_public_lookup_shows_recent_codes(tmp_path)
     assert "330119" in lookup_response.text
     assert "noreply@tm.openai.com" in lookup_response.text
     assert "cranes_solute.1o@icloud.com" in lookup_response.text
-    assert fake_cloudmail.calls == [("openai@eve.ink", 5)]
+    assert fake_cloudmail.calls == [("cranes_solute.1o@icloud.com", 5)]
 
 
 
@@ -272,3 +288,127 @@ def test_admin_can_edit_and_delete_key(tmp_path) -> None:
 
     missing_lookup = client.get("/mailbox/buyer-key-2")
     assert missing_lookup.status_code == 404
+
+
+def test_mailbox_filters_shared_query_mailbox_by_detected_original_recipient(tmp_path) -> None:
+    fake_cloudmail = FakeCloudMailClient(
+        messages=[
+            CloudMailMessage(
+                email_id=1,
+                send_email="noreply@tm.openai.com",
+                send_name="OpenAI",
+                subject="code-for-other",
+                to_email="openai@eve.ink",
+                to_name="",
+                create_time="2026-04-18 15:00:00",
+                type=0,
+                content="<div>收件人：other@example.com</div><div>111111</div>",
+                text="收件人：other@example.com\n111111",
+                is_del=0,
+            ),
+            CloudMailMessage(
+                email_id=2,
+                send_email="noreply@tm.openai.com",
+                send_name="OpenAI",
+                subject="code-for-target",
+                to_email="openai@eve.ink",
+                to_name="",
+                create_time="2026-04-18 15:01:00",
+                type=0,
+                content="<div>收件人：target@example.com</div><div>222222</div>",
+                text="收件人：target@example.com\n222222",
+                is_del=0,
+            ),
+        ]
+    )
+    settings = AppSettings(
+        app_secret_key="test-secret",
+        app_admin_username="admin",
+        app_admin_password="pass123",
+        database_path=str(tmp_path / "app.db"),
+        cloudmail_base_url="https://mail.example.com",
+        cloudmail_admin_email="admin@example.com",
+        cloudmail_admin_password="secret",
+        lookup_email_limit=5,
+    )
+    app = create_app(settings=settings, cloudmail_client=fake_cloudmail)
+    client = TestClient(app)
+
+    client.post(
+        "/admin/login",
+        data={"username": "admin", "password": "pass123"},
+        follow_redirects=True,
+    )
+    client.post(
+        "/admin/keys",
+        data={
+            "recipient_email": "target@example.com",
+            "query_email": "openai@eve.ink",
+            "access_key": "target-key",
+            "label": "target",
+        },
+        follow_redirects=True,
+    )
+
+    response = client.get("/mailbox/target-key")
+
+    assert response.status_code == 200
+    assert "code-for-target" in response.text
+    assert "222222" in response.text
+    assert "code-for-other" not in response.text
+    assert "111111" not in response.text
+
+
+def test_mailbox_hides_shared_query_mailbox_messages_when_original_recipient_cannot_be_determined(tmp_path) -> None:
+    fake_cloudmail = FakeCloudMailClient(
+        messages=[
+            CloudMailMessage(
+                email_id=1,
+                send_email="noreply@tm.openai.com",
+                send_name="OpenAI",
+                subject="mixed-mailbox-message",
+                to_email="openai@eve.ink",
+                to_name="",
+                create_time="2026-04-18 15:02:00",
+                type=0,
+                content="<div>ChatGPT Log-in Code</div><div>330119</div>",
+                text="ChatGPT Log-in Code\n330119",
+                is_del=0,
+            )
+        ]
+    )
+    settings = AppSettings(
+        app_secret_key="test-secret",
+        app_admin_username="admin",
+        app_admin_password="pass123",
+        database_path=str(tmp_path / "app.db"),
+        cloudmail_base_url="https://mail.example.com",
+        cloudmail_admin_email="admin@example.com",
+        cloudmail_admin_password="secret",
+        lookup_email_limit=5,
+    )
+    app = create_app(settings=settings, cloudmail_client=fake_cloudmail)
+    client = TestClient(app)
+
+    client.post(
+        "/admin/login",
+        data={"username": "admin", "password": "pass123"},
+        follow_redirects=True,
+    )
+    client.post(
+        "/admin/keys",
+        data={
+            "recipient_email": "target@example.com",
+            "query_email": "openai@eve.ink",
+            "access_key": "target-key",
+            "label": "target",
+        },
+        follow_redirects=True,
+    )
+
+    response = client.get("/mailbox/target-key")
+
+    assert response.status_code == 200
+    assert "mixed-mailbox-message" not in response.text
+    assert "330119" not in response.text
+    assert "无法从 CloudMail 返回内容里识别原始收件人" in response.text
