@@ -28,6 +28,10 @@
       <span>固定 Token</span>
       <input type="text" name="api_token" value="{{ cloudmail_config.api_token }}" placeholder="请输入固定 Token" required>
     </label>
+    <label>
+      <span>默认 CloudMail 查询邮箱（可选）</span>
+      <input type="email" name="default_query_email" value="{{ cloudmail_config.default_query_email }}" placeholder="例如：openai@eve.ink">
+    </label>
     <button type="submit">保存 CloudMail 配置</button>
   </form>
 </section>
@@ -47,7 +51,7 @@
     </label>
     <label>
       <span>CloudMail 查询邮箱</span>
-      <input type="email" name="query_email" placeholder="例如：openai@eve.ink；留空则默认等于原始收件人邮箱">
+      <input type="email" name="query_email" value="{{ cloudmail_config.default_query_email }}" placeholder="例如：openai@eve.ink；留空则优先使用后台默认查询邮箱，没有默认值时等于原始收件人邮箱">
     </label>
     <label>
       <span>自定义 Key（可选）</span>
@@ -75,7 +79,7 @@
               </label>
               <label>
                 <span>CloudMail 查询邮箱</span>
-                <input type="email" name="query_email" value="{{ item.query_email }}" required>
+                <input type="email" name="query_email" value="{{ item.query_email }}" placeholder="留空则优先使用后台默认查询邮箱，没有默认值时等于原始收件人邮箱">
               </label>
               <label>
                 <span>查看 Key</span>

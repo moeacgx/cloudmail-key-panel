@@ -21,6 +21,7 @@ class AccessMapping:
 class CloudMailSettingsRecord:
     base_url: str
     api_token: str
+    default_query_email: str
     updated_at: str
 
 
@@ -149,9 +150,15 @@ class KeyStore:
 
         return [mapping for row in rows if (mapping := self._row_to_mapping(row)) is not None]
 
-    def save_cloudmail_settings(self, base_url: str, api_token: str) -> CloudMailSettingsRecord:
+    def save_cloudmail_settings(
+        self,
+        base_url: str,
+        api_token: str,
+        default_query_email: str = "",
+    ) -> CloudMailSettingsRecord:
         normalized_base_url = base_url.strip()
         normalized_api_token = api_token.strip()
+        normalized_default_query_email = default_query_email.strip().lower()
 
         if not normalized_base_url:
             raise ValueError("base_url is required")
@@ -170,6 +177,7 @@ class KeyStore:
                 [
                     ("cloudmail_base_url", normalized_base_url, updated_at),
                     ("cloudmail_api_token", normalized_api_token, updated_at),
+                    ("default_query_email", normalized_default_query_email, updated_at),
                 ],
             )
             connection.commit()
@@ -177,6 +185,7 @@ class KeyStore:
         return CloudMailSettingsRecord(
             base_url=normalized_base_url,
             api_token=normalized_api_token,
+            default_query_email=normalized_default_query_email,
             updated_at=updated_at,
         )
 
@@ -184,15 +193,17 @@ class KeyStore:
         self,
         default_base_url: str = "",
         default_api_token: str = "",
+        default_query_email: str = "",
     ) -> CloudMailSettingsRecord:
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT key, value, updated_at FROM app_settings WHERE key IN ('cloudmail_base_url', 'cloudmail_api_token')"
+                "SELECT key, value, updated_at FROM app_settings WHERE key IN ('cloudmail_base_url', 'cloudmail_api_token', 'default_query_email')"
             ).fetchall()
 
         values = {
             "cloudmail_base_url": default_base_url,
             "cloudmail_api_token": default_api_token,
+            "default_query_email": default_query_email,
         }
         updated_at = ""
 
@@ -203,6 +214,7 @@ class KeyStore:
         return CloudMailSettingsRecord(
             base_url=values["cloudmail_base_url"],
             api_token=values["cloudmail_api_token"],
+            default_query_email=values["default_query_email"],
             updated_at=updated_at,
         )
 

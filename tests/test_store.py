@@ -78,10 +78,13 @@ def test_key_store_persists_cloudmail_settings(tmp_path) -> None:
     saved = store.save_cloudmail_settings(
         base_url=" https://mail.boxmoe.eu.org/ ",
         api_token=" fixed-token-123 ",
+        default_query_email=" OpenAI@eve.ink ",
     )
     loaded = store.get_cloudmail_settings()
 
     assert saved.base_url == "https://mail.boxmoe.eu.org/"
     assert saved.api_token == "fixed-token-123"
+    assert saved.default_query_email == "openai@eve.ink"
     assert loaded.base_url == "https://mail.boxmoe.eu.org/"
     assert loaded.api_token == "fixed-token-123"
+    assert loaded.default_query_email == "openai@eve.ink"

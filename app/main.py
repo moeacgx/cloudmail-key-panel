@@ -135,12 +135,17 @@ def create_app(
         request: Request,
         base_url: str = Form(...),
         api_token: str = Form(...),
+        default_query_email: str = Form(""),
     ) -> Response:
         if not _is_admin(request):
             return RedirectResponse(url="/admin/login", status_code=status.HTTP_303_SEE_OTHER)
 
         try:
-            request.app.state.store.save_cloudmail_settings(base_url=base_url, api_token=api_token)
+            request.app.state.store.save_cloudmail_settings(
+                base_url=base_url,
+                api_token=api_token,
+                default_query_email=default_query_email,
+            )
         except ValueError as exc:
             return _render_admin_dashboard(request, error=_translate_store_error(str(exc)), status_code=status.HTTP_400_BAD_REQUEST)
 
@@ -160,7 +165,7 @@ def create_app(
         try:
             request.app.state.store.create_mapping(
                 recipient_email=recipient_email,
-                query_email=query_email or None,
+                query_email=_resolve_query_email(request, query_email),
                 access_key=access_key or None,
                 label=label,
             )
@@ -185,7 +190,7 @@ def create_app(
             request.app.state.store.update_mapping(
                 mapping_id=mapping_id,
                 recipient_email=recipient_email,
-                query_email=query_email or None,
+                query_email=_resolve_query_email(request, query_email),
                 access_key=access_key,
                 label=label,
             )
@@ -257,6 +262,15 @@ def _resolve_cloudmail_config(request: Request) -> ResolvedCloudMailConfig:
         admin_email=settings.cloudmail_admin_email or None,
         admin_password=settings.cloudmail_admin_password or None,
     )
+
+
+def _resolve_query_email(request: Request, query_email: str) -> str | None:
+    normalized_query_email = query_email.strip().lower()
+    if normalized_query_email:
+        return normalized_query_email
+
+    default_query_email = _get_cloudmail_settings_for_display(request).default_query_email.strip().lower()
+    return default_query_email or None
 
 
 def _get_cloudmail_client(request: Request) -> Any:

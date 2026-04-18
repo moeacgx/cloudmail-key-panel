@@ -135,6 +135,7 @@ def test_admin_can_save_cloudmail_settings_and_lookup_uses_saved_token(tmp_path)
         data={
             "base_url": "https://mail.boxmoe.eu.org/",
             "api_token": "fixed-token-123",
+            "default_query_email": "openai@eve.ink",
         },
         follow_redirects=True,
     )
@@ -142,12 +143,13 @@ def test_admin_can_save_cloudmail_settings_and_lookup_uses_saved_token(tmp_path)
     assert save_response.status_code == 200
     assert "CloudMail 配置已保存" in save_response.text
     assert "https://mail.boxmoe.eu.org/" in save_response.text
+    assert 'name="query_email" value="openai@eve.ink"' in save_response.text
 
     client.post(
         "/admin/keys",
         data={
             "recipient_email": "buyer@example.com",
-            "query_email": "openai@eve.ink",
+            "query_email": "",
             "access_key": "buyer-key-1",
             "label": "buyer-order",
         },
