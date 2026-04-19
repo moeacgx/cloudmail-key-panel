@@ -2,6 +2,8 @@
 
 一个基于 Python + FastAPI 的 CloudMail 配套 Web 面板。
 
+AI/站长交流群：https://t.me/vpsbbq
+
 用途：
 - 后台绑定“原始收件人邮箱（toEmail）”和一个查看 Key
 - 前台用户输入 Key 后，直接查看这个收件人最近收到的验证码邮件
