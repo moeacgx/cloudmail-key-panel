@@ -107,20 +107,6 @@ docker compose up -d --build
 - `http://127.0.0.1:38080/`
 - `http://127.0.0.1:38080/admin/login`
 
-## 推荐部署到 152.53.179.54 的方式
-
-建议流程：
-
-1. 先在本地把项目跑通并测试
-2. 提交到 GitHub 仓库
-3. 在服务器上拉取仓库
-4. 配置 `.env`
-5. 执行：
-
-```bash
-docker compose up -d --build
-```
-
 ## 测试
 
 ```bash
