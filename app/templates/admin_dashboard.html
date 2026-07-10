@@ -1,226 +1,244 @@
 {% extends "base.html" %}
 
 {% block content %}
-<section class="card">
-  <div class="mailbox-header">
+<section class="card border border-base-300 bg-base-100">
+  <div class="card-body">
+  <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
     <div>
-      <h2>后台管理</h2>
-      <p>这里可以管理 CloudMail 配置、生成查看 Key，并按原始收件人邮箱给买家提供查询入口。</p>
+      <h2 class="card-title text-2xl">后台管理</h2>
+      <p class="mt-2 text-sm text-base-content/60">这里可以管理 CloudMail 配置、生成查看 Key，并按原始收件人邮箱给买家提供查询入口。</p>
     </div>
     <form method="post" action="/admin/logout">
-      <button type="submit" class="secondary">退出登录</button>
+      <button type="submit" class="btn btn-ghost btn-sm">退出登录</button>
     </form>
   </div>
 
   {% if error %}
-    <div class="alert error">{{ error }}</div>
+    <div class="alert border border-base-content/20">{{ error }}</div>
   {% endif %}
   {% if message %}
-    <div class="alert success">{{ message }}</div>
+    <div class="alert border border-base-content/20">{{ message }}</div>
   {% endif %}
 
-  <div class="mapping-summary-grid">
-    <div class="mapping-field">
-      <span class="mapping-field-label">CloudMail 地址</span>
+  <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+    <div class="grid gap-1">
+      <span class="text-xs font-medium text-base-content/50">CloudMail 地址</span>
       <strong>{{ cloudmail_config.base_url or '未填写' }}</strong>
     </div>
-    <div class="mapping-field">
-      <span class="mapping-field-label">固定 Token</span>
+    <div class="grid gap-1">
+      <span class="text-xs font-medium text-base-content/50">固定 Token</span>
       <span>{{ '已配置' if cloudmail_config.api_token else '未配置' }}</span>
     </div>
-    <div class="mapping-field">
-      <span class="mapping-field-label">内部管理员模式</span>
+    <div class="grid gap-1">
+      <span class="text-xs font-medium text-base-content/50">内部管理员模式</span>
       <span>{{ '已配置' if cloudmail_config.internal_admin_email and cloudmail_config.internal_admin_password else '未配置' }}</span>
     </div>
-    <div class="mapping-field">
-      <span class="mapping-field-label">默认查询邮箱</span>
+    <div class="grid gap-1">
+      <span class="text-xs font-medium text-base-content/50">默认查询邮箱</span>
       <span>{{ cloudmail_config.default_query_email or '未设置' }}</span>
     </div>
-    <div class="mapping-field">
-      <span class="mapping-field-label">最近拉取邮件数</span>
+    <div class="grid gap-1">
+      <span class="text-xs font-medium text-base-content/50">最近拉取邮件数</span>
       <span>{{ cloudmail_config.recent_email_limit }}</span>
     </div>
-    <div class="mapping-field">
-      <span class="mapping-field-label">系统时区</span>
+    <div class="grid gap-1">
+      <span class="text-xs font-medium text-base-content/50">系统时区</span>
       <span>{{ cloudmail_config.display_timezone }}</span>
     </div>
   </div>
 
-  <div class="action-row top-gap">
-    <button type="button" class="secondary compact-action-button" data-cloudmail-config-trigger>编辑 CloudMail 配置</button>
+  <div class="mt-4 flex flex-wrap gap-2">
+    <a class="btn btn-outline btn-sm" href="/admin/workbench">打开注册工作台</a>
+    <button type="button" class="btn btn-outline btn-sm" data-cloudmail-config-trigger>编辑 CloudMail 配置</button>
+  </div>
   </div>
 
-  <dialog id="cloudmail-config-dialog" class="mapping-dialog">
-    <div class="dialog-header">
+  <dialog id="cloudmail-config-dialog" class="modal">
+    <div class="modal-box max-w-3xl">
+    <div class="flex items-start justify-between gap-4">
       <div>
-        <h3>编辑 CloudMail 配置</h3>
-        <p>配置放进弹窗里，平时不用一直占着页面空间。</p>
+        <h3 class="text-lg font-semibold">编辑 CloudMail 配置</h3>
+        <p class="mt-1 text-sm text-base-content/60">配置放进弹窗里，平时不用一直占着页面空间。</p>
       </div>
-      <button type="button" class="secondary compact-action-button" data-close-dialog>关闭</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-close-dialog>关闭</button>
     </div>
-    <form method="post" action="/admin/cloudmail" class="stack-form">
+    <form method="post" action="/admin/cloudmail" class="mt-5 grid gap-4">
       <input type="hidden" name="q" value="{{ search_query }}">
       <input type="hidden" name="category" value="{{ current_category }}">
       <input type="hidden" name="page" value="{{ current_page }}">
       <label>
-        <span>CloudMail 地址</span>
-        <input type="url" name="base_url" value="{{ cloudmail_config.base_url }}" placeholder="https://mail.boxmoe.eu.org/" required>
+        <span class="text-sm font-medium">CloudMail 地址</span>
+        <input class="input input-bordered w-full" type="url" name="base_url" value="{{ cloudmail_config.base_url }}" placeholder="https://mail.boxmoe.eu.org/" required>
       </label>
       <label>
-        <span>固定 Token（可选）</span>
-        <input type="text" name="api_token" value="{{ cloudmail_config.api_token }}" placeholder="继续使用 public /api/public/emailList 时填写">
+        <span class="text-sm font-medium">固定 Token（可选）</span>
+        <input class="input input-bordered w-full" type="text" name="api_token" value="{{ cloudmail_config.api_token }}" placeholder="继续使用 public /api/public/emailList 时填写">
       </label>
       <label>
-        <span>CloudMail 管理员邮箱（可选）</span>
-        <input type="email" name="internal_admin_email" value="{{ cloudmail_config.internal_admin_email }}" placeholder="填写后优先走内部 /api/login + /api/allEmail/list">
+        <span class="text-sm font-medium">CloudMail 管理员邮箱（可选）</span>
+        <input class="input input-bordered w-full" type="email" name="internal_admin_email" value="{{ cloudmail_config.internal_admin_email }}" placeholder="填写后优先走内部 /api/login + /api/allEmail/list">
       </label>
       <label>
-        <span>CloudMail 管理员密码（可选）</span>
-        <input type="password" name="internal_admin_password" value="{{ cloudmail_config.internal_admin_password }}" placeholder="和管理员邮箱一起填写">
+        <span class="text-sm font-medium">CloudMail 管理员密码（可选）</span>
+        <input class="input input-bordered w-full" type="password" name="internal_admin_password" value="{{ cloudmail_config.internal_admin_password }}" placeholder="和管理员邮箱一起填写">
       </label>
       <label>
-        <span>默认 CloudMail 查询邮箱（可选）</span>
-        <input type="email" name="default_query_email" value="{{ cloudmail_config.default_query_email }}" placeholder="例如：openai@eve.ink">
+        <span class="text-sm font-medium">默认 CloudMail 查询邮箱（可选）</span>
+        <input class="input input-bordered w-full" type="email" name="default_query_email" value="{{ cloudmail_config.default_query_email }}" placeholder="例如：openai@eve.ink">
       </label>
       <label>
-        <span>实时拉取最近几封邮件</span>
-        <input type="number" name="recent_email_limit" min="1" step="1" value="{{ cloudmail_config.recent_email_limit }}" placeholder="例如：3" required>
+        <span class="text-sm font-medium">实时拉取最近几封邮件</span>
+        <input class="input input-bordered w-full" type="number" name="recent_email_limit" min="1" step="1" value="{{ cloudmail_config.recent_email_limit }}" placeholder="例如：3" required>
       </label>
       <label>
-        <span>系统时区</span>
-        <input type="text" name="display_timezone" value="{{ cloudmail_config.display_timezone }}" placeholder="例如：Asia/Shanghai / UTC / Europe/Berlin" required>
+        <span class="text-sm font-medium">系统时区</span>
+        <input class="input input-bordered w-full" type="text" name="display_timezone" value="{{ cloudmail_config.display_timezone }}" placeholder="例如：Asia/Shanghai / UTC / Europe/Berlin" required>
       </label>
-      <div class="action-row">
-        <button type="submit">保存 CloudMail 配置</button>
-        <button type="button" class="secondary compact-action-button" data-close-dialog>取消</button>
+      <div class="modal-action">
+        <button type="submit" class="btn btn-outline">保存 CloudMail 配置</button>
+        <button type="button" class="btn btn-ghost" data-close-dialog>取消</button>
       </div>
     </form>
+    </div>
   </dialog>
 </section>
 
-<section class="card">
-  <div class="mailbox-header">
+<section class="card border border-base-300 bg-base-100">
+  <div class="card-body">
+  <div>
     <div>
-      <h2>创建查看 Key</h2>
-      <p>原始收件人邮箱支持一行一个批量导入；批量创建时会自动为每个邮箱生成单独的 Key。</p>
+      <h2 class="card-title text-2xl">创建查看 Key</h2>
+      <p class="mt-2 text-sm text-base-content/60">原始收件人邮箱支持一行一个批量导入；批量创建时会自动为每个邮箱生成单独的 Key。</p>
     </div>
   </div>
 
-  <form method="post" action="/admin/keys" class="stack-form">
-    <label>
-      <span>原始收件人邮箱</span>
-      <textarea name="recipient_email" rows="5" placeholder="cranes_solute.1o@icloud.com&#10;buyer2@example.com&#10;buyer3@example.com" required></textarea>
+  <form method="post" action="/admin/keys" class="mt-5 grid gap-4">
+    <label class="grid gap-2">
+      <span class="text-sm font-medium">原始收件人邮箱</span>
+      <textarea class="textarea textarea-bordered min-h-32 w-full" name="recipient_email" rows="5" placeholder="cranes_solute.1o@icloud.com&#10;buyer2@example.com&#10;buyer3@example.com" required></textarea>
     </label>
-    <label>
-      <span>CloudMail 查询邮箱</span>
-      <input type="email" name="query_email" value="{{ cloudmail_config.default_query_email }}" placeholder="例如：openai@eve.ink；留空则优先使用后台默认查询邮箱，没有默认值时等于原始收件人邮箱">
+    <label class="grid gap-2">
+      <span class="text-sm font-medium">CloudMail 查询邮箱</span>
+      <input class="input input-bordered w-full" type="email" name="query_email" value="{{ cloudmail_config.default_query_email }}" placeholder="例如：openai@eve.ink；留空则优先使用后台默认查询邮箱，没有默认值时等于原始收件人邮箱">
     </label>
-    <label>
-      <span>自定义 Key（可选）</span>
-      <input type="text" name="access_key" placeholder="单个邮箱时可自定义；批量导入时请留空自动生成">
+    <label class="grid gap-2">
+      <span class="text-sm font-medium">自定义 Key（可选）</span>
+      <input class="input input-bordered w-full" type="text" name="access_key" placeholder="单个邮箱时可自定义；批量导入时请留空自动生成">
     </label>
-    <label>
-      <span>备注（可选）</span>
-      <input type="text" name="label" placeholder="例如订单号 / 商品名">
+    <label class="grid gap-2">
+      <span class="text-sm font-medium">备注（可选）</span>
+      <input class="input input-bordered w-full" type="text" name="label" placeholder="例如订单号 / 商品名">
     </label>
-    <label>
-      <span>分类（可选）</span>
-      <input type="text" name="category" list="category-options" placeholder="例如：OpenAI OTP / Apple / Steam">
+    <label class="grid gap-2">
+      <span class="text-sm font-medium">分类（可选）</span>
+      <select class="select select-bordered w-full" name="category" data-category-select data-category-custom-target="create-category-custom">
+        <option value="">不设置分类</option>
+        {% for category_name in categories %}
+          <option value="{{ category_name }}">{{ category_name }}</option>
+        {% endfor %}
+        <option value="__custom__">其他分类</option>
+      </select>
     </label>
-    <button type="submit">生成并保存</button>
+    <label id="create-category-custom" class="hidden grid gap-2">
+      <span class="text-sm font-medium">新分类名称</span>
+      <input class="input input-bordered w-full" type="text" name="category_custom" placeholder="输入新的分类名称">
+    </label>
+    <button type="submit" class="btn btn-outline">生成并保存</button>
   </form>
+  </div>
 </section>
 
-<section class="card">
-  <div class="mailbox-header">
+<section class="card border border-base-300 bg-base-100">
+  <div class="card-body">
+  <div>
     <div>
-      <h2>已创建的 Key</h2>
-      <p>当前共 {{ total_mappings }} 个 Key，可搜索、按分类筛选、翻页、批量删除、批量导出链接。</p>
+      <h2 class="card-title text-2xl">已创建的 Key</h2>
+      <p class="mt-2 text-sm text-base-content/60">当前共 {{ total_mappings }} 个 Key，可搜索、按分类筛选、翻页、批量删除、批量导出链接。</p>
     </div>
   </div>
 
-  <form method="get" action="/admin" class="admin-toolbar">
-    <label class="toolbar-search">
-      <span>搜索 Key / 收件人 / 查询邮箱 / 备注</span>
-      <input type="text" name="q" value="{{ search_query }}" placeholder="输入关键词筛选">
+  <form method="get" action="/admin" class="mt-5 grid gap-4 lg:grid-cols-12 lg:items-end">
+    <label class="grid gap-2 lg:col-span-7">
+      <span class="text-sm font-medium">搜索 Key / 收件人 / 查询邮箱 / 备注</span>
+      <input class="input input-bordered w-full" type="text" name="q" value="{{ search_query }}" placeholder="输入关键词筛选">
     </label>
-    <label class="toolbar-category">
-      <span>分类筛选</span>
-      <select name="category">
+    <label class="grid gap-2 lg:col-span-3">
+      <span class="text-sm font-medium">分类筛选</span>
+      <select class="select select-bordered w-full" name="category">
         <option value="">全部分类</option>
         {% for category_name in categories %}
           <option value="{{ category_name }}" {% if current_category == category_name %}selected{% endif %}>{{ category_name }}</option>
         {% endfor %}
       </select>
     </label>
-    <div class="action-row">
-      <button type="submit" class="compact-action-button">搜索</button>
+    <div class="flex flex-wrap gap-2 lg:col-span-2">
+      <button type="submit" class="btn btn-outline btn-sm">搜索</button>
       {% if search_query or current_category %}
-        <a class="button secondary compact-action-button" href="/admin">清空筛选</a>
+        <a class="btn btn-ghost btn-sm" href="/admin">清空筛选</a>
       {% endif %}
     </div>
   </form>
 
   {% if mappings %}
-    <form method="post" action="/admin/keys/batch-delete" class="stack-form">
+    <form method="post" action="/admin/keys/batch-delete" class="mt-5 grid gap-4">
       <input type="hidden" name="q" value="{{ search_query }}">
       <input type="hidden" name="category" value="{{ current_category }}">
       <input type="hidden" name="page" value="{{ current_page }}">
 
-      <div class="action-row toolbar-row">
-        <label class="selection-toggle">
-          <input type="checkbox" data-select-all>
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <label class="label cursor-pointer justify-start gap-2">
+          <input class="checkbox checkbox-sm" type="checkbox" data-select-all>
           <span>全选本页</span>
         </label>
-        <div class="action-row">
-          <button type="button" class="secondary compact-action-button" data-export-selected-links>导出选中链接</button>
-          <button type="submit" class="danger compact-action-button">批量删除选中</button>
+        <div class="flex flex-wrap gap-2">
+          <button type="button" class="btn btn-outline btn-sm" data-export-selected-links>导出选中链接</button>
+          <button type="submit" class="btn btn-outline btn-sm">批量删除选中</button>
         </div>
-        <span class="meta">第 {{ current_page }} / {{ total_pages }} 页</span>
+        <span class="text-sm text-base-content/60">第 {{ current_page }} / {{ total_pages }} 页</span>
       </div>
 
-      <div class="mapping-list">
+      <div class="grid gap-3">
         {% for item in mappings %}
           {% set frontend_url = request.url_for('mailbox', access_key=item.access_key) %}
-          <article class="mapping-card compact-mapping-card">
-            <div class="action-row compact-selection-row">
-              <label class="selection-toggle">
-                <input type="checkbox" name="mapping_ids" value="{{ item.id }}" data-row-selector data-link-url="{{ frontend_url }}">
-                <span>选中这个 Key</span>
+          <article class="card border border-base-300 bg-base-100" data-mapping-card="{{ item.id }}">
+            <div class="card-body gap-3 p-4 sm:p-5">
+            <div class="flex flex-col gap-3 border-b border-base-300 pb-3 sm:flex-row sm:items-start sm:justify-between">
+              <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-2">
+                  <strong class="break-all text-base sm:text-lg">{{ item.recipient_email }}</strong>
+                  <span class="badge {% if item.status == 'in_progress' %}badge-warning{% else %}badge-success{% endif %}" data-mapping-status>{{ item.status_label }}</span>
+                  <span class="badge badge-outline">{{ item.category or '未分类' }}</span>
+                </div>
+                <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-base-content/50">
+                  <span>ID {{ item.id }}</span>
+                  <span>创建于 {{ item.created_at }}</span>
+                  <span>目标站点：<span class="text-base-content/70" data-mapping-target-site>{{ item.target_site or '未设置' }}</span></span>
+                </div>
+              </div>
+              <label class="label cursor-pointer justify-start gap-2 py-0 sm:pt-1">
+                <input class="checkbox checkbox-sm" type="checkbox" name="mapping_ids" value="{{ item.id }}" data-row-selector data-link-url="{{ frontend_url }}">
+                <span class="text-sm">选择</span>
               </label>
             </div>
-            <div class="mapping-summary-grid">
-              <div class="mapping-field">
-                <span class="mapping-field-label">原始收件人邮箱</span>
-                <strong>{{ item.recipient_email }}</strong>
+            <div class="grid gap-3 text-sm sm:grid-cols-2">
+              <div class="grid gap-1 rounded-box border border-base-300 px-3 py-2">
+                <span class="text-xs font-medium text-base-content/50">CloudMail 查询邮箱</span>
+                <code class="break-all font-mono text-base-content/80">{{ item.query_email }}</code>
               </div>
-              <div class="mapping-field">
-                <span class="mapping-field-label">CloudMail 查询邮箱</span>
-                <code>{{ item.query_email }}</code>
-              </div>
-              <div class="mapping-field">
-                <span class="mapping-field-label">查看 Key</span>
-                <code>{{ item.access_key }}</code>
-              </div>
-              <div class="mapping-field">
-                <span class="mapping-field-label">备注</span>
-                <span>{{ item.label or '—' }}</span>
-              </div>
-              <div class="mapping-field">
-                <span class="mapping-field-label">分类</span>
-                <span>{{ item.category or '未分类' }}</span>
+              <div class="grid gap-1 rounded-box border border-base-300 px-3 py-2">
+                <span class="text-xs font-medium text-base-content/50">查看 Key</span>
+                <code class="break-all font-mono text-base-content/80">{{ item.access_key }}</code>
               </div>
             </div>
-            <div class="mapping-meta">
-              <span>ID：{{ item.id }}</span>
-              <span>创建时间：{{ item.created_at }}</span>
-            </div>
-            <div class="action-row key-action-row">
-              <a class="button secondary compact-action-button" href="{{ frontend_url }}" target="_blank">打开前台</a>
-              <button type="button" class="secondary compact-action-button" data-copy-link-url="{{ frontend_url }}">复制链接</button>
+            {% if item.label %}
+              <div class="text-sm text-base-content/60">备注：<span class="text-base-content/80">{{ item.label }}</span></div>
+            {% endif %}
+            <div class="flex flex-wrap gap-2 border-t border-base-300 pt-3">
+              <a class="btn btn-outline btn-sm" href="{{ frontend_url }}" target="_blank">打开前台</a>
+              <button type="button" class="btn btn-ghost btn-sm" data-copy-link-url="{{ frontend_url }}">复制链接</button>
               <button
                 type="button"
-                class="secondary compact-action-button"
+                class="btn btn-ghost btn-sm"
                 data-edit-key-trigger
                 data-id="{{ item.id }}"
                 data-recipient-email="{{ item.recipient_email }}"
@@ -228,8 +246,12 @@
                 data-access-key="{{ item.access_key }}"
                 data-label="{{ item.label }}"
                 data-category="{{ item.category }}"
-              >编辑这个 Key</button>
-              <button type="submit" formaction="/admin/keys/{{ item.id }}/delete" class="danger compact-action-button" formnovalidate>删除这个 Key</button>
+              >编辑</button>
+              {% if item.status == 'in_progress' %}
+                <button type="button" class="btn btn-ghost btn-sm" data-reset-status data-id="{{ item.id }}">取消占用</button>
+              {% endif %}
+              <button type="submit" formaction="/admin/keys/{{ item.id }}/delete" class="btn btn-ghost btn-sm" formnovalidate>删除</button>
+            </div>
             </div>
           </article>
         {% endfor %}
@@ -237,93 +259,102 @@
     </form>
 
     {% if total_pages > 1 %}
-      <div class="pagination-row">
-        <form method="get" action="/admin" class="inline-form">
+      <div class="mt-5 flex flex-wrap items-center justify-center gap-3">
+        <form method="get" action="/admin">
           <input type="hidden" name="q" value="{{ search_query }}">
           <input type="hidden" name="category" value="{{ current_category }}">
           <input type="hidden" name="page" value="{{ previous_page }}">
-          <button type="submit" class="secondary compact-action-button" {% if not has_previous_page %}disabled{% endif %}>上一页</button>
+          <button type="submit" class="btn btn-outline btn-sm" {% if not has_previous_page %}disabled{% endif %}>上一页</button>
         </form>
-        <span class="pagination-status">第 {{ current_page }} / {{ total_pages }} 页</span>
-        <form method="get" action="/admin" class="inline-form">
+        <span class="text-sm font-medium text-base-content/60">第 {{ current_page }} / {{ total_pages }} 页</span>
+        <form method="get" action="/admin">
           <input type="hidden" name="q" value="{{ search_query }}">
           <input type="hidden" name="category" value="{{ current_category }}">
           <input type="hidden" name="page" value="{{ next_page }}">
-          <button type="submit" class="secondary compact-action-button" {% if not has_next_page %}disabled{% endif %}>下一页</button>
+          <button type="submit" class="btn btn-outline btn-sm" {% if not has_next_page %}disabled{% endif %}>下一页</button>
         </form>
       </div>
     {% endif %}
 
-    <dialog id="mapping-edit-dialog" class="mapping-dialog">
-      <div class="dialog-header">
+    <dialog id="mapping-edit-dialog" class="modal">
+      <div class="modal-box max-w-3xl">
+      <div class="flex items-start justify-between gap-4">
         <div>
-          <h3>编辑 Key</h3>
-          <p>这里只在点击编辑时弹出，不会把所有 Key 的内容都展开占满页面。</p>
+          <h3 class="text-lg font-semibold">编辑 Key</h3>
+          <p class="mt-1 text-sm text-base-content/60">这里只在点击编辑时弹出，不会把所有 Key 的内容都展开占满页面。</p>
         </div>
-        <button type="button" class="secondary compact-action-button" data-close-dialog>关闭</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-close-dialog>关闭</button>
       </div>
-      <form id="mapping-edit-form" method="post" class="stack-form">
+      <form id="mapping-edit-form" method="post" class="mt-5 grid gap-4">
         <input type="hidden" name="q" value="{{ search_query }}">
         <input type="hidden" name="category" value="{{ current_category }}">
         <input type="hidden" name="page" value="{{ current_page }}">
-        <div class="mapping-grid">
-          <label>
-            <span>原始收件人邮箱</span>
-            <input id="edit-recipient-email" type="email" name="recipient_email" required>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <label class="grid gap-2">
+            <span class="text-sm font-medium">原始收件人邮箱</span>
+            <input id="edit-recipient-email" class="input input-bordered w-full" type="email" name="recipient_email" required>
           </label>
-          <label>
-            <span>CloudMail 查询邮箱</span>
-            <input id="edit-query-email" type="email" name="query_email" placeholder="留空则优先使用后台默认查询邮箱，没有默认值时等于原始收件人邮箱">
+          <label class="grid gap-2">
+            <span class="text-sm font-medium">CloudMail 查询邮箱</span>
+            <input id="edit-query-email" class="input input-bordered w-full" type="email" name="query_email" placeholder="留空则优先使用后台默认查询邮箱，没有默认值时等于原始收件人邮箱">
           </label>
-          <label>
-            <span>查看 Key</span>
-            <input id="edit-access-key" type="text" name="access_key" required>
+          <label class="grid gap-2">
+            <span class="text-sm font-medium">查看 Key</span>
+            <input id="edit-access-key" class="input input-bordered w-full" type="text" name="access_key" required>
           </label>
-          <label>
-            <span>备注</span>
-            <input id="edit-label" type="text" name="label" placeholder="例如订单号 / 商品名">
+          <label class="grid gap-2">
+            <span class="text-sm font-medium">备注</span>
+            <input id="edit-label" class="input input-bordered w-full" type="text" name="label" placeholder="例如订单号 / 商品名">
           </label>
-          <label>
-            <span>分类</span>
-            <input id="edit-category" type="text" name="category_value" list="category-options" placeholder="例如：OpenAI OTP / Apple / Steam">
+          <label class="grid gap-2 sm:col-span-2">
+            <span class="text-sm font-medium">分类</span>
+            <select id="edit-category" class="select select-bordered w-full" name="category_value" data-category-select data-category-custom-target="edit-category-custom">
+              <option value="">不设置分类</option>
+              {% for category_name in categories %}
+                <option value="{{ category_name }}">{{ category_name }}</option>
+              {% endfor %}
+              <option value="__custom__">其他分类</option>
+            </select>
+          </label>
+          <label id="edit-category-custom" class="hidden grid gap-2 sm:col-span-2">
+            <span class="text-sm font-medium">新分类名称</span>
+            <input id="edit-category-custom-input" class="input input-bordered w-full" type="text" name="category_custom" placeholder="输入新的分类名称">
           </label>
         </div>
-        <div class="action-row">
-          <button type="submit">保存修改</button>
-          <button type="button" class="secondary compact-action-button" data-close-dialog>取消</button>
+        <div class="modal-action">
+          <button type="submit" class="btn btn-outline">保存修改</button>
+          <button type="button" class="btn btn-ghost" data-close-dialog>取消</button>
         </div>
       </form>
+      </div>
     </dialog>
 
-    <dialog id="export-links-dialog" class="mapping-dialog">
-      <div class="dialog-header">
+    <dialog id="export-links-dialog" class="modal">
+      <div class="modal-box max-w-3xl">
+      <div class="flex items-start justify-between gap-4">
         <div>
-          <h3>导出选中链接</h3>
-          <p>下面是一行一个的链接，复制给买家会更方便。</p>
+          <h3 class="text-lg font-semibold">导出选中链接</h3>
+          <p class="mt-1 text-sm text-base-content/60">下面是一行一个的链接，复制给买家会更方便。</p>
         </div>
-        <button type="button" class="secondary compact-action-button" data-close-dialog>关闭</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-close-dialog>关闭</button>
       </div>
-      <div class="stack-form">
-        <label>
-          <span>链接列表</span>
-          <textarea id="export-links-output" rows="10" readonly placeholder="先勾选要导出的 Key，再点“导出选中链接”"></textarea>
+      <div class="mt-5 grid gap-4">
+        <label class="grid gap-2">
+          <span class="text-sm font-medium">链接列表</span>
+          <textarea id="export-links-output" class="textarea textarea-bordered min-h-48 w-full font-mono text-sm" rows="10" readonly placeholder="先勾选要导出的 Key，再点“导出选中链接”"></textarea>
         </label>
-        <div class="action-row">
-          <button type="button" class="secondary compact-action-button" data-copy-exported-links>复制全部链接</button>
-          <button type="button" class="secondary compact-action-button" data-close-dialog>取消</button>
+        <div class="modal-action">
+          <button type="button" class="btn btn-outline" data-copy-exported-links>复制全部链接</button>
+          <button type="button" class="btn btn-ghost" data-close-dialog>取消</button>
         </div>
+      </div>
       </div>
     </dialog>
   {% else %}
-    <div class="alert">{{ '没有匹配到任何 Key。' if search_query or current_category else '暂时还没有 Key。' }}</div>
+    <div class="alert mt-5">{{ '没有匹配到任何 Key。' if search_query or current_category else '暂时还没有 Key。' }}</div>
   {% endif %}
+  </div>
 </section>
-
-<datalist id="category-options">
-  {% for category_name in categories %}
-    <option value="{{ category_name }}"></option>
-  {% endfor %}
-</datalist>
 
 <script>
   (() => {
@@ -332,6 +363,20 @@
     const exportDialog = document.getElementById('export-links-dialog');
     const mappingForm = document.getElementById('mapping-edit-form');
     const exportOutput = document.getElementById('export-links-output');
+
+    const syncCategoryCustomInput = (select) => {
+      const target = document.getElementById(select.dataset.categoryCustomTarget || '');
+      if (!target) return;
+      const customInput = target.querySelector('input');
+      const isCustom = select.value === '__custom__';
+      target.classList.toggle('hidden', !isCustom);
+      if (customInput) customInput.required = isCustom;
+    };
+
+    document.querySelectorAll('[data-category-select]').forEach((select) => {
+      select.addEventListener('change', () => syncCategoryCustomInput(select));
+      syncCategoryCustomInput(select);
+    });
 
     const copyText = async (value) => {
       if (!value) return;
@@ -342,8 +387,8 @@
       const fallback = document.createElement('textarea');
       fallback.value = value;
       fallback.setAttribute('readonly', 'readonly');
-      fallback.style.position = 'absolute';
-      fallback.style.left = '-9999px';
+      fallback.setAttribute('aria-hidden', 'true');
+      fallback.className = 'fixed left-0 top-0 opacity-0';
       document.body.appendChild(fallback);
       fallback.select();
       document.execCommand('copy');
@@ -360,6 +405,7 @@
       const keyInput = document.getElementById('edit-access-key');
       const labelInput = document.getElementById('edit-label');
       const categoryInput = document.getElementById('edit-category');
+      const categoryCustomInput = document.getElementById('edit-category-custom-input');
 
       document.querySelectorAll('[data-edit-key-trigger]').forEach((button) => {
         button.addEventListener('click', () => {
@@ -368,7 +414,11 @@
           queryInput.value = button.dataset.queryEmail || '';
           keyInput.value = button.dataset.accessKey || '';
           labelInput.value = button.dataset.label || '';
-          categoryInput.value = button.dataset.category || '';
+          const category = button.dataset.category || '';
+          const optionExists = Array.from(categoryInput.options).some((option) => option.value === category);
+          categoryInput.value = optionExists ? category : '__custom__';
+          if (categoryCustomInput) categoryCustomInput.value = optionExists ? '' : category;
+          syncCategoryCustomInput(categoryInput);
           mappingDialog.showModal();
         });
       });
@@ -377,6 +427,34 @@
     document.querySelectorAll('[data-copy-link-url]').forEach((button) => {
       button.addEventListener('click', async () => {
         await copyText(button.dataset.copyLinkUrl || '');
+      });
+    });
+
+    document.querySelectorAll('[data-reset-status]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        if (button.disabled) return;
+        button.disabled = true;
+        try {
+          const response = await fetch('/api/admin/keys/' + button.dataset.id + '/reset-status', {
+            method: 'POST',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+          });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.message || '取消占用失败');
+
+          const card = document.querySelector('[data-mapping-card="' + button.dataset.id + '"]');
+          const status = card?.querySelector('[data-mapping-status]');
+          const targetSite = card?.querySelector('[data-mapping-target-site]');
+          if (status) {
+            status.className = 'badge badge-success';
+            status.textContent = payload.mapping?.status_label || '空闲';
+          }
+          if (targetSite) targetSite.textContent = '未设置';
+          button.remove();
+        } catch (error) {
+          window.alert(error.message || '取消占用失败');
+          button.disabled = false;
+        }
       });
     });
 

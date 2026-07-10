@@ -1,65 +1,67 @@
 {% if error %}
-  <div class="alert error">{{ error }}</div>
+  <div class="alert border border-base-content/20">{{ error }}</div>
 {% else %}
-  <div class="mailbox-header">
+  <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
     <div>
-      <h2>最近验证码邮件</h2>
-      <p>当前收件人：<strong>{{ mapping.recipient_email }}</strong></p>
-      <p>查看 Key：<code>{{ mapping.access_key }}</code></p>
+      <h2 class="text-2xl font-semibold">最近验证码邮件</h2>
+      <p class="mt-2 text-sm text-base-content/60">当前收件人：<strong class="text-base-content">{{ mapping.recipient_email }}</strong></p>
+      <p class="mt-1 text-sm text-base-content/60">查看 Key：<code class="kbd kbd-sm">{{ mapping.access_key }}</code></p>
     </div>
-    <a class="button secondary" href="/">重新输入 Key</a>
+    <a class="btn btn-outline btn-sm" href="/">重新输入 Key</a>
   </div>
 
-  <p class="mail-refresh-hint">页面会自动获取新邮件，无需手动刷新。当前按 {{ display_timezone }} 显示时间。</p>
+  <p class="mt-4 text-sm text-base-content/60">页面会自动获取新邮件，无需手动刷新。当前按 {{ display_timezone }} 显示时间。</p>
 
   {% if notice %}
-    <div class="alert">{{ notice }}</div>
+    <div class="alert mt-4">{{ notice }}</div>
   {% endif %}
 
   {% if emails %}
-    <div class="mail-grid">
+    <div class="mt-5 grid gap-4">
       {% for item in emails %}
-        <article class="mail-card">
-          <div class="mail-topline">
-            <h3>{{ item.message.subject or '无主题' }}</h3>
-            <span>{{ item.display_create_time }}</span>
+        <article class="card border border-base-300 bg-base-100">
+          <div class="card-body gap-4">
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <h3 class="text-lg font-semibold">{{ item.message.subject or '无主题' }}</h3>
+            <span class="text-sm text-base-content/50">{{ item.display_create_time }}</span>
           </div>
-          <div class="mail-meta-grid">
-            <div class="mail-meta-item">
-              <span class="mail-meta-label">发件人</span>
-              <p class="mail-meta-value">{{ item.message.send_email or '未知' }}</p>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div>
+              <span class="text-xs font-medium uppercase text-base-content/50">发件人</span>
+              <p class="break-words">{{ item.message.send_email or '未知' }}</p>
             </div>
-            <div class="mail-meta-item">
-              <span class="mail-meta-label">收件人</span>
-              <p class="mail-meta-value">{{ mapping.recipient_email }}</p>
+            <div>
+              <span class="text-xs font-medium uppercase text-base-content/50">收件人</span>
+              <p class="break-words">{{ mapping.recipient_email }}</p>
             </div>
           </div>
 
-          <div class="code-list">
+          <div class="flex flex-wrap gap-2">
             {% if item.codes %}
               {% for code in item.codes %}
-                <span class="code-chip">{{ code }}</span>
+                <span class="badge badge-outline badge-lg font-mono">{{ code }}</span>
               {% endfor %}
             {% else %}
-              <span class="code-chip muted">未提取到明显验证码</span>
+              <span class="badge badge-ghost">未提取到明显验证码</span>
             {% endif %}
           </div>
 
-          <div class="mail-preview-stack">
-            <div class="preview-snippet">
+          <div class="grid gap-2">
+            <div class="line-clamp-4 whitespace-pre-wrap rounded-box bg-base-200 p-3 text-sm leading-6 text-base-content/70">
               {{ item.preview }}
             </div>
-            <details class="mail-preview-details">
-              <summary class="mail-preview-summary">展开完整邮件内容</summary>
-              <div class="preview-box">
+            <details class="collapse collapse-arrow border border-base-300 bg-base-100">
+              <summary class="collapse-title min-h-0 py-3 text-sm font-medium">展开完整邮件内容</summary>
+              <div class="collapse-content whitespace-pre-wrap text-sm leading-6 text-base-content/70">
                 {{ item.preview }}
               </div>
             </details>
+          </div>
           </div>
         </article>
       {% endfor %}
     </div>
   {% elif not notice %}
-    <div class="alert">当前没有查到邮件。</div>
+    <div class="alert mt-4">当前没有查到邮件。</div>
   {% endif %}
 {% endif %}

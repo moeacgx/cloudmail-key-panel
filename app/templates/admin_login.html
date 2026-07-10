@@ -1,21 +1,23 @@
 {% extends "base.html" %}
 
 {% block content %}
-<section class="card narrow-card">
-  <h2>后台登录</h2>
+<section class="card mx-auto w-full max-w-xl border border-base-300 bg-base-100">
+  <div class="card-body gap-5">
+  <h2 class="card-title text-2xl">后台登录</h2>
   {% if error %}
-    <div class="alert error">{{ error }}</div>
+    <div class="alert border border-base-content/20">{{ error }}</div>
   {% endif %}
-  <form method="post" action="/admin/login" class="stack-form">
-    <label>
-      <span>用户名</span>
-      <input type="text" name="username" required>
+  <form method="post" action="/admin/login" class="grid gap-4">
+    <label class="grid gap-2">
+      <span class="text-sm font-medium">用户名</span>
+      <input class="input input-bordered w-full" type="text" name="username" required>
     </label>
-    <label>
-      <span>密码</span>
-      <input type="password" name="password" required>
+    <label class="grid gap-2">
+      <span class="text-sm font-medium">密码</span>
+      <input class="input input-bordered w-full" type="password" name="password" required>
     </label>
-    <button type="submit">登录后台</button>
+    <button type="submit" class="btn btn-outline">登录后台</button>
   </form>
+  </div>
 </section>
 {% endblock %}

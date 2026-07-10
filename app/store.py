@@ -7,6 +7,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+VALID_MAPPING_STATUSES = {"idle", "in_progress"}
+LEGACY_MAPPING_STATUS_ALIASES = {
+    "unused": "idle",
+    "used": "idle",
+    "skipped": "idle",
+    "failed": "idle",
+}
+MAPPING_STATUS_LABELS = {
+    "idle": "空闲",
+    "in_progress": "注册中",
+}
+
 
 @dataclass(slots=True)
 class AccessMapping:
@@ -17,6 +29,12 @@ class AccessMapping:
     label: str
     category: str
     created_at: str
+    status: str
+    claimed_at: str
+    claimed_by: str
+    used_at: str
+    last_seen_email_id: int
+    target_site: str
 
 
 @dataclass(slots=True)
@@ -44,12 +62,16 @@ class KeyStore:
         access_key: str | None = None,
         label: str = "",
         category: str = "",
+        status: str = "idle",
+        target_site: str = "",
     ) -> AccessMapping:
         normalized_email = recipient_email.strip().lower()
         normalized_query_email = (query_email or normalized_email).strip().lower()
         normalized_key = (access_key or self._generate_key()).strip()
         normalized_label = label.strip()
         normalized_category = category.strip()
+        normalized_status = self._normalize_status(status)
+        normalized_target_site = target_site.strip()
 
         if not normalized_email:
             raise ValueError("recipient_email is required")
@@ -64,8 +86,21 @@ class KeyStore:
             with self._connect() as connection:
                 cursor = connection.execute(
                     """
-                    INSERT INTO access_mappings (recipient_email, query_email, access_key, label, category, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO access_mappings (
+                        recipient_email,
+                        query_email,
+                        access_key,
+                        label,
+                        category,
+                        created_at,
+                        status,
+                        claimed_at,
+                        claimed_by,
+                        used_at,
+                        last_seen_email_id,
+                        target_site
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, '', '', '', 0, ?)
                     """,
                     (
                         normalized_email,
@@ -74,6 +109,8 @@ class KeyStore:
                         normalized_label,
                         normalized_category,
                         created_at,
+                        normalized_status,
+                        normalized_target_site,
                     ),
                 )
                 connection.commit()
@@ -88,6 +125,12 @@ class KeyStore:
             label=normalized_label,
             category=normalized_category,
             created_at=created_at,
+            status=normalized_status,
+            claimed_at="",
+            claimed_by="",
+            used_at="",
+            last_seen_email_id=0,
+            target_site=normalized_target_site,
         )
 
     def update_mapping(
@@ -152,7 +195,13 @@ class KeyStore:
     def get_by_id(self, mapping_id: int) -> AccessMapping | None:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT id, recipient_email, query_email, access_key, label, category, created_at FROM access_mappings WHERE id = ?",
+                """
+                SELECT id, recipient_email, query_email, access_key, label, category, created_at, status, claimed_at,
+                       claimed_by,
+                       used_at, last_seen_email_id, target_site
+                FROM access_mappings
+                WHERE id = ?
+                """,
                 (mapping_id,),
             ).fetchone()
 
@@ -161,7 +210,13 @@ class KeyStore:
     def get_by_key(self, access_key: str) -> AccessMapping | None:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT id, recipient_email, query_email, access_key, label, category, created_at FROM access_mappings WHERE access_key = ?",
+                """
+                SELECT id, recipient_email, query_email, access_key, label, category, created_at, status, claimed_at,
+                       claimed_by,
+                       used_at, last_seen_email_id, target_site
+                FROM access_mappings
+                WHERE access_key = ?
+                """,
                 (access_key.strip(),),
             ).fetchone()
 
@@ -175,7 +230,12 @@ class KeyStore:
         offset: int = 0,
     ) -> list[AccessMapping]:
         where_clause, params = self._build_mapping_filters(search_query, category_filter)
-        query = "SELECT id, recipient_email, query_email, access_key, label, category, created_at FROM access_mappings"
+        query = """
+            SELECT id, recipient_email, query_email, access_key, label, category, created_at, status, claimed_at,
+                   claimed_by,
+                   used_at, last_seen_email_id, target_site
+            FROM access_mappings
+        """
         if where_clause:
             query = f"{query} WHERE {where_clause}"
         query = f"{query} ORDER BY id DESC"
@@ -216,6 +276,236 @@ class KeyStore:
             connection.commit()
 
         return int(cursor.rowcount)
+
+    def get_current_workbench_mapping(self, category_filter: str = "", claimed_by: str = "") -> AccessMapping | None:
+        normalized_claimed_by = claimed_by.strip()
+        where_clause = "status = ? AND claimed_by = ?"
+        params: list[str] = ["in_progress", normalized_claimed_by]
+        normalized_category = category_filter.strip().lower()
+        if normalized_category:
+            where_clause = f"{where_clause} AND LOWER(category) = ?"
+            params.append(normalized_category)
+
+        with self._connect() as connection:
+            row = connection.execute(
+                f"""
+                SELECT id, recipient_email, query_email, access_key, label, category, created_at, status, claimed_at,
+                       claimed_by,
+                       used_at, last_seen_email_id, target_site
+                FROM access_mappings
+                WHERE {where_clause}
+                ORDER BY claimed_at DESC, id ASC
+                LIMIT 1
+                """,
+                tuple(params),
+            ).fetchone()
+
+        return self._row_to_mapping(row)
+
+    def claim_next_available_mapping(
+        self,
+        category_filter: str = "",
+        target_site: str = "",
+        claimed_by: str = "",
+    ) -> AccessMapping | None:
+        normalized_category = category_filter.strip().lower()
+        normalized_target_site = target_site.strip()
+        normalized_claimed_by = claimed_by.strip()
+        claimed_at = self._now()
+
+        if not normalized_claimed_by:
+            raise ValueError("claimed_by is required")
+
+        current = self.get_current_workbench_mapping(claimed_by=normalized_claimed_by)
+        if current is not None:
+            return current
+
+        where_clause = "status = ?"
+        params: list[str] = ["idle"]
+        if normalized_category:
+            where_clause = f"{where_clause} AND LOWER(category) = ?"
+            params.append(normalized_category)
+
+        with self._connect() as connection:
+            row = connection.execute(
+                f"""
+                SELECT id
+                FROM access_mappings
+                WHERE {where_clause}
+                ORDER BY id ASC
+                LIMIT 1
+                """,
+                tuple(params),
+            ).fetchone()
+            if row is None:
+                return None
+
+            mapping_id = int(row["id"])
+            cursor = connection.execute(
+                """
+                UPDATE access_mappings
+                SET status = 'in_progress',
+                    claimed_at = ?,
+                    claimed_by = ?,
+                    used_at = '',
+                    target_site = CASE WHEN ? != '' THEN ? ELSE target_site END
+                WHERE id = ? AND status = 'idle'
+                """,
+                (
+                    claimed_at,
+                    normalized_claimed_by,
+                    normalized_target_site,
+                    normalized_target_site,
+                    mapping_id,
+                ),
+            )
+            if cursor.rowcount == 0:
+                connection.rollback()
+                return self.claim_next_available_mapping(
+                    category_filter=category_filter,
+                    target_site=target_site,
+                    claimed_by=claimed_by,
+                )
+            connection.commit()
+
+        return self.get_by_id(mapping_id)
+
+    def update_mapping_status(
+        self,
+        mapping_id: int,
+        status: str,
+        target_site: str | None = None,
+        claimed_by: str = "",
+    ) -> AccessMapping:
+        normalized_status = self._normalize_status(status)
+        normalized_target_site = None if target_site is None else target_site.strip()
+        normalized_claimed_by = claimed_by.strip()
+        now = self._now()
+        claimed_at_value = now if normalized_status == "in_progress" else None
+
+        if normalized_status == "in_progress" and not normalized_claimed_by:
+            raise ValueError("claimed_by is required")
+
+        with self._connect() as connection:
+            existing = connection.execute("SELECT id FROM access_mappings WHERE id = ?", (mapping_id,)).fetchone()
+            if existing is None:
+                raise ValueError("mapping not found")
+
+            if claimed_at_value is None:
+                connection.execute(
+                    """
+                    UPDATE access_mappings
+                    SET status = ?,
+                        claimed_at = '',
+                        claimed_by = '',
+                        target_site = CASE WHEN ? IS NULL THEN target_site ELSE ? END
+                    WHERE id = ?
+                    """,
+                    (
+                        normalized_status,
+                        normalized_target_site,
+                        normalized_target_site,
+                        mapping_id,
+                    ),
+                )
+            else:
+                connection.execute(
+                    """
+                    UPDATE access_mappings
+                    SET status = ?,
+                        claimed_at = ?,
+                        claimed_by = ?,
+                        used_at = '',
+                        target_site = CASE WHEN ? IS NULL THEN target_site ELSE ? END
+                    WHERE id = ?
+                    """,
+                    (
+                        normalized_status,
+                        claimed_at_value,
+                        normalized_claimed_by,
+                        normalized_target_site,
+                        normalized_target_site,
+                        mapping_id,
+                    ),
+                )
+            connection.commit()
+
+        updated = self.get_by_id(mapping_id)
+        if updated is None:
+            raise ValueError("mapping not found")
+        return updated
+
+    def complete_workbench_mapping(
+        self,
+        mapping_id: int,
+        category: str,
+        target_site: str | None = None,
+        claimed_by: str = "",
+    ) -> AccessMapping:
+        normalized_category = category.strip()
+        normalized_target_site = None if target_site is None else target_site.strip()
+        normalized_claimed_by = claimed_by.strip()
+        completed_at = self._now()
+
+        if not normalized_category:
+            raise ValueError("category is required")
+        if not normalized_claimed_by:
+            raise ValueError("claimed_by is required")
+
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE access_mappings
+                SET status = 'idle',
+                    category = ?,
+                    claimed_at = '',
+                    claimed_by = '',
+                    used_at = ?,
+                    target_site = CASE WHEN ? IS NULL THEN target_site ELSE ? END
+                WHERE id = ? AND status = 'in_progress' AND claimed_by = ?
+                """,
+                (
+                    normalized_category,
+                    completed_at,
+                    normalized_target_site,
+                    normalized_target_site,
+                    mapping_id,
+                    normalized_claimed_by,
+                ),
+            )
+            connection.commit()
+
+        if cursor.rowcount == 0:
+            raise ValueError("mapping not claimed by this session")
+
+        updated = self.get_by_id(mapping_id)
+        if updated is None:
+            raise ValueError("mapping not found")
+        return updated
+
+    def reset_mapping_status(self, mapping_id: int) -> AccessMapping:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE access_mappings
+                SET status = 'idle',
+                    claimed_at = '',
+                    claimed_by = '',
+                    last_seen_email_id = 0,
+                    target_site = ''
+                WHERE id = ?
+                """,
+                (mapping_id,),
+            )
+            connection.commit()
+
+        if cursor.rowcount == 0:
+            raise ValueError("mapping not found")
+
+        updated = self.get_by_id(mapping_id)
+        if updated is None:
+            raise ValueError("mapping not found")
+        return updated
 
     def save_cloudmail_settings(
         self,
@@ -326,7 +616,13 @@ class KeyStore:
                     access_key TEXT NOT NULL UNIQUE,
                     label TEXT NOT NULL DEFAULT '',
                     category TEXT NOT NULL DEFAULT '',
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'idle',
+                    claimed_at TEXT NOT NULL DEFAULT '',
+                    claimed_by TEXT NOT NULL DEFAULT '',
+                    used_at TEXT NOT NULL DEFAULT '',
+                    last_seen_email_id INTEGER NOT NULL DEFAULT 0,
+                    target_site TEXT NOT NULL DEFAULT ''
                 )
                 """
             )
@@ -351,8 +647,51 @@ class KeyStore:
                 connection.execute(
                     "ALTER TABLE access_mappings ADD COLUMN category TEXT NOT NULL DEFAULT ''"
                 )
+            if "status" not in columns:
+                connection.execute(
+                    "ALTER TABLE access_mappings ADD COLUMN status TEXT NOT NULL DEFAULT 'idle'"
+                )
+            if "claimed_at" not in columns:
+                connection.execute(
+                    "ALTER TABLE access_mappings ADD COLUMN claimed_at TEXT NOT NULL DEFAULT ''"
+                )
+            if "claimed_by" not in columns:
+                connection.execute(
+                    "ALTER TABLE access_mappings ADD COLUMN claimed_by TEXT NOT NULL DEFAULT ''"
+                )
+            if "used_at" not in columns:
+                connection.execute(
+                    "ALTER TABLE access_mappings ADD COLUMN used_at TEXT NOT NULL DEFAULT ''"
+                )
+            if "last_seen_email_id" not in columns:
+                connection.execute(
+                    "ALTER TABLE access_mappings ADD COLUMN last_seen_email_id INTEGER NOT NULL DEFAULT 0"
+                )
+            if "target_site" not in columns:
+                connection.execute(
+                    "ALTER TABLE access_mappings ADD COLUMN target_site TEXT NOT NULL DEFAULT ''"
+                )
             connection.execute(
                 "UPDATE access_mappings SET query_email = recipient_email WHERE query_email = '' OR query_email IS NULL"
+            )
+            connection.execute(
+                """
+                UPDATE access_mappings
+                SET status = CASE WHEN status = 'in_progress' THEN 'in_progress' ELSE 'idle' END,
+                    claimed_at = CASE WHEN status = 'in_progress' THEN claimed_at ELSE '' END,
+                    claimed_by = CASE WHEN status = 'in_progress' THEN claimed_by ELSE '' END
+                WHERE status != 'idle' OR status IS NULL OR TRIM(status) = ''
+                """
+            )
+            connection.execute(
+                """
+                UPDATE access_mappings
+                SET status = 'idle',
+                    claimed_at = '',
+                    claimed_by = '',
+                    target_site = ''
+                WHERE status = 'in_progress' AND (claimed_by IS NULL OR TRIM(claimed_by) = '')
+                """
             )
             connection.commit()
 
@@ -382,6 +721,14 @@ class KeyStore:
             params.append(normalized_category)
 
         return " AND ".join(clauses), params
+
+    @staticmethod
+    def _normalize_status(value: str) -> str:
+        normalized = (value or "idle").strip().lower()
+        normalized = LEGACY_MAPPING_STATUS_ALIASES.get(normalized, normalized)
+        if normalized not in VALID_MAPPING_STATUSES:
+            raise ValueError("status is invalid")
+        return normalized
 
     @staticmethod
     def _normalize_recent_email_limit(value: int | str) -> int:
@@ -422,4 +769,10 @@ class KeyStore:
             label=row["label"],
             category=row["category"],
             created_at=row["created_at"],
+            status=row["status"] if row["status"] in VALID_MAPPING_STATUSES else "idle",
+            claimed_at=row["claimed_at"],
+            claimed_by=row["claimed_by"],
+            used_at=row["used_at"],
+            last_seen_email_id=int(row["last_seen_email_id"]),
+            target_site=row["target_site"],
         )

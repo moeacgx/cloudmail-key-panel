@@ -4,6 +4,7 @@ import hmac
 import html
 import json
 import re
+import secrets
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,7 +12,7 @@ from typing import Any, Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import FastAPI, Form, Request, Response, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -19,7 +20,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.cloudmail import CloudMailClient, CloudMailError
 from app.code_extractor import extract_verification_codes
 from app.settings import AppSettings
-from app.store import CloudMailSettingsRecord, KeyStore
+from app.store import AccessMapping, CloudMailSettingsRecord, KeyStore, MAPPING_STATUS_LABELS
 
 _TAG_PATTERN = re.compile(r"<[^>]+>")
 _WHITESPACE_PATTERN = re.compile(r"\s+")
@@ -49,6 +50,7 @@ _ORIGINAL_RECIPIENT_PATTERNS = [
 ]
 ADMIN_PAGE_SIZE = 10
 MAILBOX_POLL_INTERVAL_MS = 10000
+WORKBENCH_POLL_INTERVAL_MS = 5000
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
@@ -82,7 +84,7 @@ def create_app(
     app.state.cloudmail_client_factory = cloudmail_client_factory
 
     @app.get("/", response_class=HTMLResponse)
-    def home(request: Request) -> HTMLResponse:
+    def home(request: Request) -> Response:
         return _render(request, "index.html", {"error": None, "header_centered": True})
 
     @app.post("/lookup")
@@ -98,7 +100,7 @@ def create_app(
         return RedirectResponse(url=f"/mailbox/{key}", status_code=status.HTTP_303_SEE_OTHER)
 
     @app.get("/mailbox/{access_key}", response_class=HTMLResponse)
-    def mailbox(request: Request, access_key: str) -> HTMLResponse:
+    def mailbox(request: Request, access_key: str) -> Response:
         mailbox_context, status_code = _build_mailbox_context(request, access_key)
         return _render(
             request,
@@ -117,7 +119,7 @@ def create_app(
         return _render(request, "mailbox_content.html", {**mailbox_context, "access_key": access_key}, status_code=status_code)
 
     @app.get("/admin/login", response_class=HTMLResponse)
-    def admin_login(request: Request) -> HTMLResponse:
+    def admin_login(request: Request) -> Response:
         return _render(request, "admin_login.html", {"error": None})
 
     @app.post("/admin/login")
@@ -127,7 +129,9 @@ def create_app(
         password: str = Form(...),
     ) -> Response:
         if _is_valid_admin_login(request.app.state.settings, username, password):
+            request.session.clear()
             request.session["is_admin"] = True
+            request.session["workbench_session_id"] = secrets.token_urlsafe(16)
             return RedirectResponse(url="/admin", status_code=status.HTTP_303_SEE_OTHER)
 
         return _render(
@@ -142,6 +146,194 @@ def create_app(
         if not _is_admin(request):
             return RedirectResponse(url="/admin/login", status_code=status.HTTP_303_SEE_OTHER)
         return _render_admin_dashboard(request, search_query=q, category_filter=category, page=page)
+
+    @app.get("/admin/workbench", response_class=HTMLResponse)
+    def admin_workbench(request: Request) -> Response:
+        if not _is_admin(request):
+            return RedirectResponse(url="/admin/login", status_code=status.HTTP_303_SEE_OTHER)
+
+        return _render(
+            request,
+            "admin_workbench.html",
+            {
+                "categories": request.app.state.store.list_categories(),
+                "workbench_poll_interval_ms": WORKBENCH_POLL_INTERVAL_MS,
+            },
+        )
+
+    @app.get("/api/workbench/current")
+    def api_workbench_current(request: Request, category: str = "") -> JSONResponse:
+        if not _is_admin(request):
+            return _json_error("unauthorized", status.HTTP_401_UNAUTHORIZED)
+
+        mapping = request.app.state.store.get_current_workbench_mapping(
+            claimed_by=_get_workbench_session_id(request),
+        )
+        return JSONResponse(
+            {
+                "mapping": _serialize_workbench_mapping(request, mapping),
+                "message": "已恢复当前注册中的邮箱" if mapping else "当前没有注册中的邮箱",
+            }
+        )
+
+    @app.post("/api/workbench/claim-next")
+    def api_workbench_claim_next(
+        request: Request,
+        category: str = Form(""),
+        target_site: str = Form(""),
+    ) -> JSONResponse:
+        if not _is_admin(request):
+            return _json_error("unauthorized", status.HTTP_401_UNAUTHORIZED)
+
+        workbench_session_id = _get_workbench_session_id(request)
+        current = request.app.state.store.get_current_workbench_mapping(claimed_by=workbench_session_id)
+        if current is not None:
+            return JSONResponse(
+                {
+                    "mapping": _serialize_workbench_mapping(request, current),
+                    "message": "已恢复当前注册中的邮箱",
+                }
+            )
+
+        mapping = request.app.state.store.claim_next_available_mapping(
+            category_filter=category,
+            target_site=target_site,
+            claimed_by=workbench_session_id,
+        )
+        return JSONResponse(
+            {
+                "mapping": _serialize_workbench_mapping(request, mapping),
+                "message": "已领取下一个邮箱" if mapping else "当前分类下没有可领取邮箱",
+            }
+        )
+
+    @app.get("/api/workbench/current/mailbox")
+    def api_workbench_current_mailbox(request: Request, category: str = "") -> JSONResponse:
+        if not _is_admin(request):
+            return _json_error("unauthorized", status.HTTP_401_UNAUTHORIZED)
+
+        mapping = request.app.state.store.get_current_workbench_mapping(
+            claimed_by=_get_workbench_session_id(request),
+        )
+        if mapping is None:
+            return JSONResponse(
+                {
+                    "mapping": None,
+                    "emails": [],
+                    "error": None,
+                    "notice": "当前没有注册中的邮箱",
+                }
+            )
+
+        payload, status_code = _build_workbench_mailbox_payload(request, mapping)
+        return JSONResponse(payload, status_code=status_code)
+
+    @app.post("/api/workbench/current/mark-used")
+    def api_workbench_mark_used(
+        request: Request,
+        mapping_id: int = Form(...),
+        category: str = Form(""),
+        target_site: str = Form(""),
+        complete_category: str = Form("已使用"),
+        complete_category_custom: str = Form(""),
+    ) -> JSONResponse:
+        if not _is_admin(request):
+            return _json_error("unauthorized", status.HTTP_401_UNAUTHORIZED)
+
+        try:
+            resolved_complete_category = _resolve_completion_category(complete_category, complete_category_custom)
+        except ValueError as exc:
+            return _json_error(_translate_store_error(str(exc)), status.HTTP_400_BAD_REQUEST)
+
+        completed, next_mapping, message, status_code = _complete_workbench_mapping(
+            request,
+            mapping_id=mapping_id,
+            complete_category=resolved_complete_category,
+            category=category,
+            target_site=target_site,
+            claimed_by=_get_workbench_session_id(request),
+        )
+        return JSONResponse(
+            {
+                "completed": _serialize_workbench_mapping(request, completed),
+                "mapping": _serialize_workbench_mapping(request, next_mapping),
+                "message": message,
+            },
+            status_code=status_code,
+        )
+
+    @app.post("/api/workbench/current/skip")
+    def api_workbench_skip(
+        request: Request,
+        mapping_id: int = Form(...),
+        category: str = Form(""),
+        target_site: str = Form(""),
+    ) -> JSONResponse:
+        if not _is_admin(request):
+            return _json_error("unauthorized", status.HTTP_401_UNAUTHORIZED)
+
+        mapping = request.app.state.store.get_by_id(mapping_id)
+        if mapping is None:
+            return _json_error("这个 Key 记录不存在或已被删除", status.HTTP_404_NOT_FOUND)
+        if mapping.status != "in_progress":
+            return _json_error("只能取消注册中的邮箱", status.HTTP_400_BAD_REQUEST)
+        if mapping.claimed_by != _get_workbench_session_id(request):
+            return _json_error("这个邮箱不是当前工作台领取的", status.HTTP_409_CONFLICT)
+
+        completed = request.app.state.store.reset_mapping_status(mapping_id)
+        return JSONResponse(
+            {
+                "completed": _serialize_workbench_mapping(request, completed),
+                "mapping": None,
+                "message": "已取消领取，分类未改变",
+            }
+        )
+
+    @app.post("/api/workbench/current/reset-status")
+    def api_workbench_reset_status(
+        request: Request,
+        mapping_id: int = Form(...),
+    ) -> JSONResponse:
+        if not _is_admin(request):
+            return _json_error("unauthorized", status.HTTP_401_UNAUTHORIZED)
+
+        mapping = request.app.state.store.get_by_id(mapping_id)
+        if mapping is None:
+            return _json_error("这个 Key 记录不存在或已被删除", status.HTTP_404_NOT_FOUND)
+        if mapping.status != "in_progress":
+            return _json_error("只能重置注册中的当前邮箱", status.HTTP_400_BAD_REQUEST)
+        if mapping.claimed_by != _get_workbench_session_id(request):
+            return _json_error("这个邮箱不是当前工作台领取的", status.HTTP_409_CONFLICT)
+
+        reset_mapping = request.app.state.store.reset_mapping_status(mapping_id)
+        return JSONResponse(
+            {
+                "completed": _serialize_workbench_mapping(request, reset_mapping),
+                "mapping": None,
+                "message": "已取消领取，分类未改变",
+            }
+        )
+
+    @app.post("/api/admin/keys/{mapping_id}/reset-status")
+    def api_admin_reset_key_status(request: Request, mapping_id: int) -> JSONResponse:
+        if not _is_admin(request):
+            return _json_error("unauthorized", status.HTTP_401_UNAUTHORIZED)
+
+        mapping = request.app.state.store.get_by_id(mapping_id)
+        if mapping is None:
+            return _json_error("Key record does not exist or was deleted", status.HTTP_404_NOT_FOUND)
+
+        try:
+            reset_mapping = request.app.state.store.reset_mapping_status(mapping_id)
+        except ValueError as exc:
+            return _json_error(_translate_store_error(str(exc)), status.HTTP_400_BAD_REQUEST)
+
+        return JSONResponse(
+            {
+                "mapping": _serialize_workbench_mapping(request, reset_mapping),
+                "message": "Workbench claim cancelled",
+            }
+        )
 
     @app.post("/admin/cloudmail")
     def admin_save_cloudmail_settings(
@@ -196,6 +388,7 @@ def create_app(
         access_key: str = Form(""),
         label: str = Form(""),
         category: str = Form(""),
+        category_custom: str = Form(""),
     ) -> Response:
         if not _is_admin(request):
             return RedirectResponse(url="/admin/login", status_code=status.HTTP_303_SEE_OTHER)
@@ -206,13 +399,14 @@ def create_app(
                 raise ValueError("批量导入多个邮箱时不能自定义单个 Key，请留空自动生成")
 
             resolved_query_email = _resolve_query_email(request, query_email)
+            resolved_category = _resolve_mapping_category(category, category_custom)
             for index, email in enumerate(recipient_emails):
                 request.app.state.store.create_mapping(
                     recipient_email=email,
                     query_email=resolved_query_email,
                     access_key=access_key if index == 0 and len(recipient_emails) == 1 else None,
                     label=label,
-                    category=category,
+                    category=resolved_category,
                 )
         except ValueError as exc:
             return _render_admin_dashboard(request, error=_translate_store_error(str(exc)), status_code=status.HTTP_400_BAD_REQUEST)
@@ -229,6 +423,7 @@ def create_app(
         access_key: str = Form(...),
         label: str = Form(""),
         category_value: str = Form(""),
+        category_custom: str = Form(""),
         q: str = Form(""),
         category: str = Form(""),
         page: int = Form(1),
@@ -243,7 +438,7 @@ def create_app(
                 query_email=_resolve_query_email(request, query_email),
                 access_key=access_key,
                 label=label,
-                category=category_value,
+                category=_resolve_mapping_category(category_value, category_custom),
             )
         except ValueError as exc:
             return _render_admin_dashboard(
@@ -294,6 +489,37 @@ def create_app(
             page=page,
         )
 
+    @app.post("/admin/keys/{mapping_id}/reset-status")
+    def admin_reset_key_status(
+        request: Request,
+        mapping_id: int,
+        q: str = Form(""),
+        category: str = Form(""),
+        page: int = Form(1),
+    ) -> Response:
+        if not _is_admin(request):
+            return RedirectResponse(url="/admin/login", status_code=status.HTTP_303_SEE_OTHER)
+
+        try:
+            request.app.state.store.reset_mapping_status(mapping_id)
+        except ValueError as exc:
+            return _render_admin_dashboard(
+                request,
+                error=_translate_store_error(str(exc)),
+                status_code=status.HTTP_400_BAD_REQUEST,
+                search_query=q,
+                category_filter=category,
+                page=page,
+            )
+
+        return _render_admin_dashboard(
+            request,
+            message="工作台占用已取消",
+            search_query=q,
+            category_filter=category,
+            page=page,
+        )
+
     @app.post("/admin/keys/batch-delete")
     def admin_batch_delete_keys(
         request: Request,
@@ -338,6 +564,10 @@ def _render(request: Request, template_name: str, context: dict[str, Any], statu
     return TEMPLATES.TemplateResponse(request, template_name, merged, status_code=status_code)
 
 
+def _json_error(message: str, status_code: int) -> JSONResponse:
+    return JSONResponse({"error": message, "message": message}, status_code=status_code)
+
+
 def _build_mailbox_context(request: Request, access_key: str) -> tuple[dict[str, Any], int]:
     mapping = request.app.state.store.get_by_key(access_key)
     if mapping is None:
@@ -379,6 +609,127 @@ def _build_mailbox_context(request: Request, access_key: str) -> tuple[dict[str,
     }, status.HTTP_200_OK
 
 
+def _build_workbench_mailbox_payload(request: Request, mapping: AccessMapping) -> tuple[dict[str, Any], int]:
+    cloudmail_settings = _get_cloudmail_settings_for_display(request)
+
+    try:
+        emails = _get_cloudmail_client(request).fetch_recent_emails(
+            mapping.query_email,
+            limit=cloudmail_settings.recent_email_limit,
+        )
+    except CloudMailError as exc:
+        return {
+            "mapping": _serialize_workbench_mapping(request, mapping),
+            "emails": [],
+            "error": f"CloudMail 查询失败：{exc}",
+            "notice": None,
+        }, status.HTTP_502_BAD_GATEWAY
+
+    filtered_emails, notice = _filter_emails_for_mapping(mapping.recipient_email, mapping.query_email, emails)
+    rendered_emails = []
+    for email, detected_recipients in filtered_emails:
+        rendered_emails.append(
+            {
+                "email_id": email.email_id,
+                "send_email": email.send_email,
+                "send_name": email.send_name,
+                "subject": email.subject,
+                "to_email": mapping.recipient_email,
+                "create_time": email.create_time,
+                "display_create_time": _format_timestamp_for_display(
+                    email.create_time,
+                    cloudmail_settings.display_timezone,
+                ),
+                "codes": extract_verification_codes(email.subject, email.text, email.content),
+                "preview": _build_preview(email.text, email.content),
+                "detected_recipients": detected_recipients,
+            }
+        )
+
+    return {
+        "mapping": _serialize_workbench_mapping(request, mapping),
+        "emails": rendered_emails,
+        "error": None,
+        "notice": notice,
+        "display_timezone": cloudmail_settings.display_timezone,
+    }, status.HTTP_200_OK
+
+
+def _complete_workbench_mapping(
+    request: Request,
+    mapping_id: int,
+    complete_category: str,
+    category: str,
+    target_site: str,
+    claimed_by: str,
+) -> tuple[AccessMapping | None, AccessMapping | None, str, int]:
+    mapping = request.app.state.store.get_by_id(mapping_id)
+    if mapping is None:
+        return None, None, "这个 Key 记录不存在或已被删除", status.HTTP_404_NOT_FOUND
+    if mapping.status != "in_progress":
+        return None, None, "只能处理注册中的邮箱", status.HTTP_400_BAD_REQUEST
+    if mapping.claimed_by != claimed_by:
+        return None, None, "这个邮箱不是当前工作台领取的", status.HTTP_409_CONFLICT
+
+    completed = request.app.state.store.complete_workbench_mapping(
+        mapping_id=mapping_id,
+        category=complete_category,
+        target_site=target_site,
+        claimed_by=claimed_by,
+    )
+    next_mapping = request.app.state.store.claim_next_available_mapping(
+        category_filter=category,
+        target_site=target_site,
+        claimed_by=claimed_by,
+    )
+    if next_mapping is None:
+        return completed, None, f"当前邮箱已改为分类“{complete_category}”，暂无下一个可领取邮箱", status.HTTP_200_OK
+    return completed, next_mapping, f"当前邮箱已改为分类“{complete_category}”，并已领取下一个邮箱", status.HTTP_200_OK
+
+
+def _resolve_completion_category(complete_category: str, custom_category: str) -> str:
+    normalized_category = (complete_category or "").strip()
+    normalized_custom = (custom_category or "").strip()
+    if normalized_category == "__custom__":
+        normalized_category = normalized_custom
+    if not normalized_category:
+        raise ValueError("category is required")
+    return normalized_category
+
+
+def _resolve_mapping_category(category: str, custom_category: str) -> str:
+    normalized_category = (category or "").strip()
+    if normalized_category != "__custom__":
+        return normalized_category
+
+    normalized_custom = (custom_category or "").strip()
+    if not normalized_custom:
+        raise ValueError("category is required")
+    return normalized_custom
+
+
+def _serialize_workbench_mapping(request: Request, mapping: AccessMapping | None) -> dict[str, Any] | None:
+    if mapping is None:
+        return None
+
+    return {
+        "id": mapping.id,
+        "recipient_email": mapping.recipient_email,
+        "query_email": mapping.query_email,
+        "access_key": mapping.access_key,
+        "label": mapping.label,
+        "category": mapping.category,
+        "created_at": mapping.created_at,
+        "status": mapping.status,
+        "status_label": MAPPING_STATUS_LABELS.get(mapping.status, mapping.status),
+        "claimed_at": mapping.claimed_at,
+        "used_at": mapping.used_at,
+        "last_seen_email_id": mapping.last_seen_email_id,
+        "target_site": mapping.target_site,
+        "mailbox_url": str(request.url_for("mailbox", access_key=mapping.access_key)),
+    }
+
+
 def _render_admin_dashboard(
     request: Request,
     error: str | None = None,
@@ -413,6 +764,11 @@ def _render_admin_dashboard(
             "label": mapping.label,
             "category": mapping.category,
             "created_at": _format_timestamp_for_display(mapping.created_at, cloudmail_config.display_timezone),
+            "status": mapping.status,
+            "status_label": MAPPING_STATUS_LABELS.get(mapping.status, mapping.status),
+            "claimed_at": _format_timestamp_for_display(mapping.claimed_at, cloudmail_config.display_timezone),
+            "used_at": _format_timestamp_for_display(mapping.used_at, cloudmail_config.display_timezone),
+            "target_site": mapping.target_site,
         }
         for mapping in mappings
     ]
@@ -541,6 +897,10 @@ def _translate_store_error(message: str) -> str:
         "internal_admin_credentials incomplete": "管理员邮箱和密码要么都填，要么都留空",
         "recent_email_limit must be a positive integer": "最新邮件数量必须是大于 0 的整数",
         "display_timezone is invalid": "系统时区无效，请填写正确的 IANA 时区，例如 Asia/Shanghai",
+        "status is invalid": "邮箱状态无效",
+        "category is required": "完成后分类不能为空",
+        "claimed_by is required": "工作台会话无效，请刷新后重新登录",
+        "mapping not claimed by this session": "这个邮箱不是当前工作台领取的",
     }
     return mapping.get(message, message)
 
@@ -554,6 +914,14 @@ def _is_valid_admin_login(settings: AppSettings, username: str, password: str) -
 
 def _is_admin(request: Request) -> bool:
     return bool(request.session.get("is_admin"))
+
+
+def _get_workbench_session_id(request: Request) -> str:
+    session_id = str(request.session.get("workbench_session_id") or "").strip()
+    if not session_id:
+        session_id = secrets.token_urlsafe(16)
+        request.session["workbench_session_id"] = session_id
+    return session_id
 
 
 def _build_preview(text_value: str, html_value: str) -> str:

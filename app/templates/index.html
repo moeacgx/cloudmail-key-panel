@@ -1,20 +1,24 @@
 {% extends "base.html" %}
 
 {% block content %}
-<section class="card narrow-card">
-  <h2>输入查看 Key</h2>
-  <p>输入后台发放的 Key，直接查看这个收件人邮箱最近收到的验证码邮件。</p>
+<section class="card mx-auto w-full max-w-xl border border-base-300 bg-base-100">
+  <div class="card-body gap-5">
+  <div>
+    <h2 class="card-title text-2xl">输入查看 Key</h2>
+    <p class="mt-2 text-sm text-base-content/60">输入后台发放的 Key，直接查看这个收件人邮箱最近收到的验证码邮件。</p>
+  </div>
 
   {% if error %}
-    <div class="alert error">{{ error }}</div>
+    <div class="alert border border-base-content/20">{{ error }}</div>
   {% endif %}
 
-  <form method="post" action="/lookup" class="stack-form">
-    <label>
-      <span>查看 Key</span>
-      <input type="text" name="access_key" placeholder="例如：demo-key-001" required>
+  <form method="post" action="/lookup" class="grid gap-4">
+    <label class="grid gap-2">
+      <span class="text-sm font-medium">查看 Key</span>
+      <input class="input input-bordered w-full" type="text" name="access_key" placeholder="例如：demo-key-001" required>
     </label>
-    <button type="submit">立即查看</button>
+    <button type="submit" class="btn btn-outline">立即查看</button>
   </form>
+  </div>
 </section>
 {% endblock %}
