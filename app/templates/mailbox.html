@@ -1,9 +1,10 @@
 {% extends "base.html" %}
 
 {% block content %}
-<section class="card">
-  <div class="mailbox-live-toolbar" data-mailbox-loading-indicator hidden>
-    <span class="mailbox-loader-spinner" aria-hidden="true"></span>
+<section class="card border border-base-300 bg-base-100">
+  <div class="card-body">
+  <div class="badge badge-outline gap-2 p-3" data-mailbox-loading-indicator hidden>
+    <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
     <span>正在获取新邮件…</span>
   </div>
   <div
@@ -13,6 +14,7 @@
     data-poll-interval-ms="{{ mailbox_poll_interval_ms }}"
   >
     {% include "mailbox_content.html" %}
+  </div>
   </div>
 </section>
 

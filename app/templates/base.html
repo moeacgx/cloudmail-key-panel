@@ -1,23 +1,68 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ settings.app_name }}</title>
-  <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}">
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@5" rel="stylesheet" type="text/css">
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@5/themes.css" rel="stylesheet" type="text/css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <script>
+    (() => {
+      const colorScheme = window.matchMedia('(prefers-color-scheme: dark)');
+      const savedTheme = window.localStorage.getItem('cloudmail-theme');
+      const applyTheme = (theme) => {
+        document.documentElement.dataset.theme = theme;
+      };
+
+      applyTheme(savedTheme || (colorScheme.matches ? 'black' : 'light'));
+      colorScheme.addEventListener?.('change', () => {
+        if (!window.localStorage.getItem('cloudmail-theme')) {
+          applyTheme(colorScheme.matches ? 'black' : 'light');
+        }
+      });
+    })();
+  </script>
+  <script src="https://unpkg.com/lucide@latest"></script>
 </head>
-<body>
-  <div class="page-shell">
-    <header class="site-header{% if header_centered %} centered-header{% endif %}">
+<body class="min-h-screen bg-base-300 text-base-content">
+  <div class="mx-auto min-h-screen w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
+    <header class="relative mb-6 {% if header_centered %}flex flex-col items-center text-center{% else %}flex items-start justify-between gap-4{% endif %}">
       <div>
-        <h1>{{ settings.app_name }}</h1>
-        <p>按原始收件人邮箱绑定 Key，前台凭 Key 查看最近验证码邮件。</p>
+        <h1 class="text-3xl font-semibold tracking-tight">{{ settings.app_name }}</h1>
+        <p class="mt-2 text-sm text-base-content/60">按原始收件人邮箱绑定 Key，前台凭 Key 查看最近验证码邮件。</p>
       </div>
+      <button type="button" class="btn btn-ghost btn-square btn-sm absolute right-0 top-0" data-theme-toggle aria-label="切换亮暗模式" title="切换亮暗模式">
+        <i data-lucide="moon" data-theme-toggle-icon aria-hidden="true"></i>
+      </button>
     </header>
 
-    <main>
+    <main class="space-y-5">
       {% block content %}{% endblock %}
     </main>
   </div>
+  <script>
+    (() => {
+      const toggle = document.querySelector('[data-theme-toggle]');
+      if (!toggle) return;
+
+      const updateToggle = () => {
+        const isDark = document.documentElement.dataset.theme === 'black';
+        toggle.setAttribute('aria-label', isDark ? '切换到亮色模式' : '切换到暗色模式');
+        toggle.setAttribute('title', toggle.getAttribute('aria-label'));
+        toggle.innerHTML = '<i data-lucide="' + (isDark ? 'sun' : 'moon') + '" aria-hidden="true"></i>';
+        window.lucide?.createIcons({ attrs: { 'stroke-width': 1.8 } });
+      };
+
+      toggle.addEventListener('click', () => {
+        const nextTheme = document.documentElement.dataset.theme === 'black' ? 'light' : 'black';
+        window.localStorage.setItem('cloudmail-theme', nextTheme);
+        document.documentElement.dataset.theme = nextTheme;
+        updateToggle();
+      });
+
+      updateToggle();
+    })();
+  </script>
 </body>
 </html>

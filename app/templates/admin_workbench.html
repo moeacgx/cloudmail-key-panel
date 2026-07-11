@@ -1,0 +1,386 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="card border border-base-300 bg-base-100">
+  <div class="card-body">
+  <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <div>
+      <h2 class="card-title text-2xl">注册工作台</h2>
+      <p class="mt-2 text-sm text-base-content/60">按分类领取邮箱，在这里复制邮箱、等待验证码、改分类并切到下一个。</p>
+    </div>
+    <div class="flex flex-wrap gap-2">
+      <a class="btn btn-ghost btn-sm" href="/admin">返回后台</a>
+      <form method="post" action="/admin/logout">
+        <button type="submit" class="btn btn-ghost btn-sm">退出登录</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="mt-5 grid gap-4 lg:grid-cols-4 lg:items-end">
+    <label class="grid gap-2">
+      <span class="text-sm font-medium">分类范围</span>
+      <select class="select select-bordered w-full" data-workbench-category>
+        <option value="">全部分类</option>
+        {% for category_name in categories %}
+          <option value="{{ category_name }}">{{ category_name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="grid gap-2">
+      <span class="text-sm font-medium">目标站点备注</span>
+      <input class="input input-bordered w-full" type="text" data-workbench-target-site placeholder="例如：ChatGPT">
+    </label>
+    <label class="grid gap-2">
+      <span class="text-sm font-medium">完成后改为分类</span>
+      <select class="select select-bordered w-full" data-workbench-complete-category>
+        <option value="已使用">已使用</option>
+        <option value="GPT废号">GPT废号</option>
+        <option value="Pro20X">Pro20X</option>
+        <option value="__custom__">其他分类</option>
+      </select>
+    </label>
+    <label class="grid gap-2" data-custom-complete-category-wrap hidden>
+      <span class="text-sm font-medium">其他分类名称</span>
+      <input class="input input-bordered w-full" type="text" data-workbench-complete-category-custom placeholder="输入自定义分类">
+    </label>
+    <div class="flex flex-wrap gap-2 lg:col-span-4">
+      <button type="button" class="btn btn-outline" data-claim-next>领取下一个</button>
+      <button type="button" class="btn btn-outline" data-refresh-mailbox>刷新验证码</button>
+    </div>
+  </div>
+
+  <div class="alert mt-5" data-workbench-message>请选择分类范围后领取一个邮箱。</div>
+  </div>
+</section>
+
+<section class="card border border-base-300 bg-base-100" data-current-panel hidden>
+  <div class="card-body">
+  <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <div>
+      <h2 class="card-title text-2xl">当前邮箱</h2>
+      <p class="mt-2 text-sm text-base-content/60">状态：<span class="badge badge-outline" data-current-status>未领取</span></p>
+    </div>
+    <a class="btn btn-outline btn-sm" data-open-mailbox target="_blank" rel="noreferrer">打开完整前台</a>
+  </div>
+
+  <div class="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    <div class="grid gap-1">
+      <span class="text-xs font-medium text-base-content/50">注册邮箱</span>
+      <strong class="break-words" data-current-email></strong>
+    </div>
+    <div class="grid gap-1">
+      <span class="text-xs font-medium text-base-content/50">查看 Key</span>
+      <code class="kbd kbd-sm w-fit" data-current-key></code>
+    </div>
+    <div class="grid gap-1">
+      <span class="text-xs font-medium text-base-content/50">CloudMail 查询邮箱</span>
+      <code class="kbd kbd-sm w-fit" data-current-query-email></code>
+    </div>
+    <div class="grid gap-1">
+      <span class="text-xs font-medium text-base-content/50">备注 / 分类</span>
+      <span data-current-meta></span>
+    </div>
+  </div>
+
+  <div class="mt-5 flex flex-wrap gap-2">
+    <button type="button" class="btn btn-outline" data-copy-email>复制邮箱</button>
+    <button type="button" class="btn btn-outline" data-copy-key>复制 Key</button>
+    <button type="button" class="btn btn-outline" data-mark-used>保存分类并下一个</button>
+    <button type="button" class="btn btn-ghost" data-skip-current>取消领取</button>
+  </div>
+  </div>
+</section>
+
+<section class="card border border-base-300 bg-base-100" data-mailbox-panel hidden>
+  <div class="card-body">
+  <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <div>
+      <h2 class="card-title text-2xl">实时验证码</h2>
+      <p class="mt-2 text-sm text-base-content/60" data-mailbox-hint>页面会自动获取新邮件。</p>
+    </div>
+    <div class="badge badge-outline gap-2 p-3" data-workbench-loading hidden>
+      <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
+      <span>正在获取新邮件…</span>
+    </div>
+  </div>
+  <div class="mt-5" data-mailbox-output>
+    <div class="alert">领取邮箱后会在这里显示最近验证码邮件。</div>
+  </div>
+  </div>
+</section>
+
+<script>
+  (() => {
+    const pollInterval = Number('{{ workbench_poll_interval_ms }}');
+    const categoryInput = document.querySelector('[data-workbench-category]');
+    const targetSiteInput = document.querySelector('[data-workbench-target-site]');
+    const completeCategoryInput = document.querySelector('[data-workbench-complete-category]');
+    const completeCategoryCustomInput = document.querySelector('[data-workbench-complete-category-custom]');
+    const customCompleteCategoryWrap = document.querySelector('[data-custom-complete-category-wrap]');
+    const messageBox = document.querySelector('[data-workbench-message]');
+    const currentPanel = document.querySelector('[data-current-panel]');
+    const mailboxPanel = document.querySelector('[data-mailbox-panel]');
+    const loading = document.querySelector('[data-workbench-loading]');
+    const mailboxOutput = document.querySelector('[data-mailbox-output]');
+    const mailboxHint = document.querySelector('[data-mailbox-hint]');
+    const currentStatus = document.querySelector('[data-current-status]');
+    const currentEmail = document.querySelector('[data-current-email]');
+    const currentKey = document.querySelector('[data-current-key]');
+    const currentQueryEmail = document.querySelector('[data-current-query-email]');
+    const currentMeta = document.querySelector('[data-current-meta]');
+    const openMailbox = document.querySelector('[data-open-mailbox]');
+
+    let currentMapping = null;
+    let poller = null;
+
+    const escapeHtml = (value) => String(value || '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+
+    const setMessage = (message, type = '') => {
+      messageBox.textContent = message || '';
+      messageBox.className = 'alert border border-base-content/20';
+    };
+
+    const setLoading = (value) => {
+      if (loading) loading.hidden = !value;
+    };
+
+    const formData = (extra = {}) => {
+      const data = new FormData();
+      data.set('category', categoryInput?.value || '');
+      data.set('target_site', targetSiteInput?.value || '');
+      data.set('complete_category', completeCategoryInput?.value || '已使用');
+      data.set('complete_category_custom', completeCategoryCustomInput?.value || '');
+      Object.entries(extra).forEach(([key, value]) => data.set(key, value));
+      return data;
+    };
+
+    const requestJson = async (url, options = {}) => {
+      const response = await fetch(url, {
+        cache: 'no-store',
+        headers: { 'X-Requested-With': 'workbench' },
+        ...options,
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.message || payload.error || '请求失败');
+      }
+      return payload;
+    };
+
+    const copyText = async (value) => {
+      if (!value) return;
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+        return;
+      }
+      const fallback = document.createElement('textarea');
+      fallback.value = value;
+      fallback.setAttribute('readonly', 'readonly');
+      fallback.setAttribute('aria-hidden', 'true');
+      fallback.className = 'fixed left-0 top-0 opacity-0';
+      document.body.appendChild(fallback);
+      fallback.select();
+      document.execCommand('copy');
+      fallback.remove();
+    };
+
+    const stopPolling = () => {
+      if (poller) window.clearInterval(poller);
+      poller = null;
+    };
+
+    const startPolling = () => {
+      stopPolling();
+      if (!currentMapping || pollInterval <= 0) return;
+      poller = window.setInterval(refreshMailbox, pollInterval);
+    };
+
+    const renderMapping = (mapping, restartPolling = true) => {
+      currentMapping = mapping;
+      if (!mapping) {
+        currentPanel.hidden = true;
+        mailboxPanel.hidden = true;
+        mailboxOutput.innerHTML = '<div class="alert">领取邮箱后会在这里显示最近验证码邮件。</div>';
+        stopPolling();
+        return;
+      }
+
+      currentPanel.hidden = false;
+      mailboxPanel.hidden = false;
+      currentStatus.textContent = mapping.status_label || mapping.status || '';
+      currentStatus.className = `badge ${mapping.status === 'in_progress' ? 'badge-warning' : 'badge-success'}`;
+      currentEmail.textContent = mapping.recipient_email || '';
+      currentKey.textContent = mapping.access_key || '';
+      currentQueryEmail.textContent = mapping.query_email || '';
+      currentMeta.textContent = [mapping.label, mapping.category, mapping.target_site].filter(Boolean).join(' / ') || '未设置';
+      openMailbox.href = mapping.mailbox_url || '#';
+      if (restartPolling) startPolling();
+    };
+
+    const renderMailbox = (payload) => {
+      if (!payload.mapping) {
+        renderMapping(null);
+        mailboxOutput.innerHTML = '<div class="alert">当前没有注册中的邮箱。</div>';
+        setMessage('当前领取已释放，请重新领取一个邮箱。');
+        return;
+      }
+      if (!currentMapping || currentMapping.id !== payload.mapping.id || currentMapping.status !== payload.mapping.status) {
+        renderMapping(payload.mapping, false);
+      } else {
+        currentMapping = payload.mapping;
+      }
+      if (payload.display_timezone) {
+        mailboxHint.textContent = `页面会自动获取新邮件，当前按 ${payload.display_timezone} 显示时间。`;
+      }
+      if (payload.error) {
+        mailboxOutput.innerHTML = `<div class="alert border border-base-content/20">${escapeHtml(payload.error)}</div>`;
+        return;
+      }
+      if (payload.notice) {
+        mailboxOutput.innerHTML = `<div class="alert">${escapeHtml(payload.notice)}</div>`;
+        return;
+      }
+      if (!payload.emails?.length) {
+        mailboxOutput.innerHTML = '<div class="alert">当前没有查到邮件。</div>';
+        return;
+      }
+
+      mailboxOutput.innerHTML = `
+        <div class="grid gap-4">
+          ${payload.emails.map((email) => `
+            <article class="card border border-base-300 bg-base-100">
+              <div class="card-body gap-4">
+              <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <h3 class="text-lg font-semibold">${escapeHtml(email.subject || '无主题')}</h3>
+                <span class="text-sm text-base-content/50">${escapeHtml(email.display_create_time || '')}</span>
+              </div>
+              <div class="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <span class="text-xs font-medium uppercase text-base-content/50">发件人</span>
+                  <p class="break-words">${escapeHtml(email.send_email || '未知')}</p>
+                </div>
+                <div>
+                  <span class="text-xs font-medium uppercase text-base-content/50">收件人</span>
+                  <p class="break-words">${escapeHtml(email.to_email || '')}</p>
+                </div>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                ${email.codes?.length
+                  ? email.codes.map((code) => `<button type="button" class="badge badge-outline badge-lg font-mono" data-copy-code="${escapeHtml(code)}">${escapeHtml(code)}</button>`).join('')
+                  : '<span class="badge badge-ghost">未提取到明显验证码</span>'}
+              </div>
+              <div class="grid gap-2">
+                <div class="line-clamp-4 whitespace-pre-wrap rounded-box bg-base-200 p-3 text-sm leading-6 text-base-content/70">${escapeHtml(email.preview || '')}</div>
+                <details class="collapse collapse-arrow border border-base-300 bg-base-100">
+                  <summary class="collapse-title min-h-0 py-3 text-sm font-medium">展开完整邮件内容</summary>
+                  <div class="collapse-content whitespace-pre-wrap text-sm leading-6 text-base-content/70">${escapeHtml(email.preview || '')}</div>
+                </details>
+              </div>
+              </div>
+            </article>
+          `).join('')}
+        </div>
+      `;
+    };
+
+    const loadCurrent = async () => {
+      try {
+        const category = encodeURIComponent(categoryInput?.value || '');
+        const payload = await requestJson(`/api/workbench/current?category=${category}`);
+        renderMapping(payload.mapping);
+        setMessage(payload.message || '');
+        if (payload.mapping) await refreshMailbox();
+      } catch (error) {
+        setMessage(error.message, 'error');
+      }
+    };
+
+    async function refreshMailbox() {
+      if (!currentMapping) return;
+      setLoading(true);
+      try {
+        const category = encodeURIComponent(categoryInput?.value || '');
+        const payload = await requestJson(`/api/workbench/current/mailbox?category=${category}`);
+        renderMailbox(payload);
+      } catch (error) {
+        mailboxOutput.innerHTML = `<div class="alert border border-base-content/20">${escapeHtml(error.message)}</div>`;
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    const claimNext = async () => {
+      try {
+        const payload = await requestJson('/api/workbench/claim-next', {
+          method: 'POST',
+          body: formData(),
+        });
+        renderMapping(payload.mapping);
+        setMessage(payload.message || '', payload.mapping ? 'success' : '');
+        if (payload.mapping) await refreshMailbox();
+      } catch (error) {
+        await loadCurrent();
+        setMessage(error.message, 'error');
+      }
+    };
+
+    const completeCurrent = async (url) => {
+      if (!currentMapping) return;
+      try {
+        const payload = await requestJson(url, {
+          method: 'POST',
+          body: formData({ mapping_id: String(currentMapping.id) }),
+        });
+        renderMapping(payload.mapping);
+        setMessage(payload.message || '', payload.mapping ? 'success' : '');
+        if (payload.mapping) {
+          await refreshMailbox();
+        } else {
+          mailboxOutput.innerHTML = '<div class="alert">暂无下一个可领取邮箱。</div>';
+        }
+      } catch (error) {
+        setMessage(error.message, 'error');
+      }
+    };
+
+    const updateCustomCategoryVisibility = () => {
+      const isCustom = completeCategoryInput?.value === '__custom__';
+      if (customCompleteCategoryWrap) customCompleteCategoryWrap.hidden = !isCustom;
+      if (isCustom) completeCategoryCustomInput?.focus();
+    };
+
+    document.querySelector('[data-claim-next]')?.addEventListener('click', claimNext);
+    document.querySelector('[data-refresh-mailbox]')?.addEventListener('click', refreshMailbox);
+    document.querySelector('[data-copy-email]')?.addEventListener('click', async () => {
+      await copyText(currentMapping?.recipient_email || '');
+      setMessage('邮箱已复制', 'success');
+    });
+    document.querySelector('[data-copy-key]')?.addEventListener('click', async () => {
+      await copyText(currentMapping?.access_key || '');
+      setMessage('Key 已复制', 'success');
+    });
+    document.querySelector('[data-mark-used]')?.addEventListener('click', () => {
+      completeCurrent('/api/workbench/current/mark-used');
+    });
+    document.querySelector('[data-skip-current]')?.addEventListener('click', () => {
+      completeCurrent('/api/workbench/current/skip');
+    });
+    completeCategoryInput?.addEventListener('change', updateCustomCategoryVisibility);
+    mailboxOutput?.addEventListener('click', async (event) => {
+      const button = event.target.closest('[data-copy-code]');
+      if (!button) return;
+      await copyText(button.dataset.copyCode || '');
+      setMessage('验证码已复制', 'success');
+    });
+    categoryInput?.addEventListener('change', loadCurrent);
+
+    updateCustomCategoryVisibility();
+    loadCurrent();
+  })();
+</script>
+{% endblock %}
