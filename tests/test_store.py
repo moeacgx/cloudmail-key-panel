@@ -1,4 +1,6 @@
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 import pytest
 
@@ -78,6 +80,17 @@ def test_key_store_updates_and_deletes_mapping(tmp_path) -> None:
     assert store.get_by_key("buyer-key-2") is None
 
 
+def test_deleting_primary_mapping_also_deletes_unclaimed_icloud_aliases(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    root = store.create_mapping("family@icloud.com")
+    alias = store.create_icloud_alias(root.id, alias_tag="temporary")
+
+    store.delete_mapping(root.id)
+
+    assert store.get_by_id(root.id) is None
+    assert store.get_by_id(alias.id) is None
+
+
 def test_key_store_supports_search_pagination_category_filter_and_batch_delete(tmp_path) -> None:
     store = KeyStore(tmp_path / "app.db")
 
@@ -128,6 +141,69 @@ def test_key_store_supports_search_pagination_category_filter_and_batch_delete(t
     assert store.get_by_key("alpha-key-1") is None
     assert store.get_by_key("gamma-key-1") is None
     assert store.get_by_key(beta_key.access_key) is not None
+
+
+def test_key_store_reuses_category_spelling_and_hides_legacy_case_variants(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    store.create_mapping(recipient_email="legacy@example.com", category="GPT废号")
+    lower_one = store.create_mapping(recipient_email="lower-one@example.com", category="temporary-one")
+    lower_two = store.create_mapping(recipient_email="lower-two@example.com", category="temporary-two")
+
+    with sqlite3.connect(store.db_path) as connection:
+        connection.executemany(
+            "UPDATE access_mappings SET category = ? WHERE id = ?",
+            [("gpt废号", lower_one.id), ("gpt废号", lower_two.id)],
+        )
+        connection.commit()
+
+    store = KeyStore(store.db_path)
+    canonical = store.create_mapping(recipient_email="fullwidth@example.com", category="ＧＰＴ废号")
+
+    assert canonical.category == "gpt废号"
+    assert store.list_categories() == ["gpt废号"]
+    assert [(item.name, item.count) for item in store.list_category_options()] == [
+        ("gpt废号", 4),
+        ("temporary-one", 0),
+        ("temporary-two", 0),
+    ]
+    assert len(store.list_mappings(category_filter="GPT废号")) == 4
+
+
+def test_key_store_backfills_stable_category_ids_and_keeps_empty_categories(tmp_path) -> None:
+    db_path = tmp_path / "app.db"
+    original = KeyStore(db_path)
+    first = original.create_mapping(recipient_email="first@example.com", category="Queue")
+    second = original.create_mapping(recipient_email="second@example.com", category="temporary")
+
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("UPDATE access_mappings SET category = 'queue' WHERE id = ?", (second.id,))
+        connection.execute("DROP TABLE categories")
+        connection.commit()
+
+    migrated = KeyStore(db_path)
+    category_id = migrated.get_category_id("ＱＵＥＵＥ")
+    assert category_id is not None
+    assert migrated.get_category_name(category_id) == "Queue"
+    assert [(item.id, item.name, item.count) for item in migrated.list_category_options()] == [
+        (category_id, "Queue", 2)
+    ]
+    assert {mapping.category for mapping in migrated.list_mappings()} == {"Queue"}
+
+    restarted = KeyStore(db_path)
+    assert restarted.get_category_id("queue") == category_id
+
+    restarted.delete_mappings([first.id, second.id])
+    assert restarted.count_mappings() == 0
+    assert restarted.get_category_name(category_id) == "Queue"
+    assert [(item.id, item.name, item.count) for item in restarted.list_category_options()] == [
+        (category_id, "Queue", 0)
+    ]
+
+    restarted.create_mapping(recipient_email="third@example.com", category="Ｑｕｅｕｅ")
+    assert restarted.get_category_id("queue") == category_id
+    assert [(item.id, item.name, item.count) for item in restarted.list_category_options()] == [
+        (category_id, "Queue", 1)
+    ]
 
 
 
@@ -266,8 +342,9 @@ def test_key_store_releases_legacy_unowned_in_progress_workbench_claims(tmp_path
     assert mapping.target_site == ""
 
 
-def test_key_store_claims_by_category_and_completion_updates_category_not_terminal_status(tmp_path) -> None:
+def test_key_store_completion_adds_platform_tag_without_overwriting_source_category(tmp_path) -> None:
     store = KeyStore(tmp_path / "app.db")
+    store.create_tag("ChatGPT", kind="service")
     first = store.create_mapping(
         recipient_email="first@example.com",
         access_key="first-key",
@@ -301,12 +378,15 @@ def test_key_store_claims_by_category_and_completion_updates_category_not_termin
     assert store.get_current_workbench_mapping(category_filter="ChatGPT", claimed_by=session_a).id == first.id
     assert store.get_current_workbench_mapping(category_filter="ChatGPT", claimed_by=session_b) is None
     assert store.claim_next_available_mapping(category_filter="已使用", claimed_by=session_a).id == first.id
+    chatgpt_tag_id = store.get_category_id("ChatGPT")
+    assert chatgpt_tag_id is not None
 
     completed = store.complete_workbench_mapping(
         first.id,
-        category="已使用",
-        target_site="ChatGPT",
+        target_tag_id=chatgpt_tag_id,
         claimed_by=session_a,
+        verification_source="admin_workbench",
+        email_id=101,
     )
     next_claimed = store.claim_next_available_mapping(
         category_filter="ChatGPT",
@@ -315,14 +395,20 @@ def test_key_store_claims_by_category_and_completion_updates_category_not_termin
     )
 
     assert completed.status == "idle"
-    assert completed.category == "已使用"
+    assert completed.category == "ChatGPT"
     assert completed.claimed_by == ""
     assert completed.used_at
     assert next_claimed.id == second.id
     assert next_claimed.status == "in_progress"
     assert next_claimed.claimed_by == session_a
     with pytest.raises(ValueError, match="mapping not claimed by this session"):
-        store.complete_workbench_mapping(second.id, category="已使用", claimed_by=session_b)
+        store.complete_workbench_mapping(
+            second.id,
+            target_tag_id=chatgpt_tag_id,
+            claimed_by=session_b,
+            verification_source="admin_workbench",
+            email_id=102,
+        )
 
     reset = store.reset_mapping_status(second.id)
     reclaimed = store.claim_next_available_mapping(
@@ -340,6 +426,165 @@ def test_key_store_claims_by_category_and_completion_updates_category_not_termin
 
     reused = store.claim_next_available_mapping(category_filter="已使用", claimed_by=session_b)
 
-    assert reused.id == first.id
+    assert reused.id == used_elsewhere.id
     assert reused.used_at == ""
-    assert store.claim_next_available_mapping(category_filter="已使用", claimed_by=session_c).id == used_elsewhere.id
+    assert store.claim_next_available_mapping(category_filter="已使用", claimed_by=session_c) is None
+
+
+def test_key_store_claims_only_later_mappings_after_completion(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    first = store.create_mapping(recipient_email="first@example.com", category="unused")
+    second = store.create_mapping(recipient_email="second@example.com", category="unused")
+    session_id = "session-a"
+
+    claimed = store.claim_next_available_mapping(claimed_by=session_id)
+    assert claimed is not None
+    assert claimed.id == first.id
+    used_tag = store.create_tag("used")
+
+    store.complete_workbench_mapping(
+        first.id,
+        target_tag_id=used_tag.id,
+        claimed_by=session_id,
+        verification_source="admin_workbench",
+        email_id=201,
+    )
+    next_mapping = store.claim_next_available_mapping(
+        claimed_by=session_id,
+        after_mapping_id=first.id,
+    )
+
+    assert next_mapping is not None
+    assert next_mapping.id == second.id
+
+    store.complete_workbench_mapping(
+        second.id,
+        target_tag_id=used_tag.id,
+        claimed_by=session_id,
+        verification_source="admin_workbench",
+        email_id=202,
+    )
+    assert store.claim_next_available_mapping(
+        claimed_by=session_id,
+        after_mapping_id=second.id,
+    ) is None
+
+
+def test_key_store_same_client_concurrent_claim_is_atomic(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    store.create_mapping(recipient_email="first@example.com", category="unused")
+    store.create_mapping(recipient_email="second@example.com", category="unused")
+    barrier = Barrier(2)
+
+    def claim() -> int:
+        barrier.wait(timeout=5)
+        mapping = store.claim_next_available_mapping(category_filter="unused", claimed_by="api:same-worker")
+        assert mapping is not None
+        return mapping.id
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        claimed_ids = list(executor.map(lambda _index: claim(), range(2)))
+
+    assert claimed_ids[0] == claimed_ids[1]
+    active = [mapping for mapping in store.list_mappings() if mapping.status == "in_progress"]
+    assert len(active) == 1
+    assert active[0].claimed_by == "api:same-worker"
+
+
+def test_key_store_owned_reset_cannot_release_a_new_owner_claim(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    mapping = store.create_mapping(recipient_email="first@example.com", category="unused")
+    store.claim_next_available_mapping(category_filter="unused", claimed_by="api:old-worker")
+
+    store.reset_mapping_status(mapping.id)
+    reclaimed = store.claim_next_available_mapping(category_filter="unused", claimed_by="api:new-worker")
+    assert reclaimed is not None
+    assert reclaimed.id == mapping.id
+
+    with pytest.raises(ValueError, match="mapping not claimed by this session"):
+        store.reset_mapping_status(mapping.id, claimed_by="api:old-worker")
+
+    still_claimed = store.get_by_id(mapping.id)
+    assert still_claimed is not None
+    assert still_claimed.status == "in_progress"
+    assert still_claimed.claimed_by == "api:new-worker"
+
+
+def test_workbench_snapshot_finalization_is_idempotent(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    mapping = store.create_mapping("snapshot-idempotent@icloud.com")
+    claimed = store.claim_next_available_mapping(
+        claimed_by="api:snapshot-worker",
+        defer_email_baseline=True,
+    )
+
+    assert claimed is not None and claimed.id == mapping.id
+    assert not store.is_workbench_claim_baseline_ready(
+        mapping.id,
+        claimed_by="api:snapshot-worker",
+    )
+
+    store.finalize_workbench_claim_baseline(
+        mapping.id,
+        claimed_by="api:snapshot-worker",
+        baseline_email_id=100,
+    )
+    store.finalize_workbench_claim_baseline(
+        mapping.id,
+        claimed_by="api:snapshot-worker",
+        baseline_email_id=200,
+    )
+
+    finalized = store.get_by_id(mapping.id)
+    assert finalized is not None
+    assert finalized.last_seen_email_id == 100
+    assert store.is_workbench_claim_baseline_ready(
+        mapping.id,
+        claimed_by="api:snapshot-worker",
+    )
+
+
+def test_migration_preserves_active_legacy_workbench_claim_boundary(tmp_path) -> None:
+    database = tmp_path / "legacy-active-snapshot.db"
+    store = KeyStore(database)
+    mapping = store.create_mapping("legacy-active@icloud.com")
+    claimed = store.claim_next_available_mapping(claimed_by="api:legacy-worker")
+
+    assert claimed is not None and claimed.id == mapping.id
+    assert store.is_workbench_claim_baseline_ready(
+        mapping.id,
+        claimed_by="api:legacy-worker",
+    )
+
+    with sqlite3.connect(database) as connection:
+        connection.execute("ALTER TABLE access_mappings DROP COLUMN claim_baseline_ready")
+        connection.commit()
+
+    migrated = KeyStore(database)
+
+    assert migrated.is_workbench_claim_baseline_ready(
+        mapping.id,
+        claimed_by="api:legacy-worker",
+    )
+
+
+def test_delete_tag_only_allows_completely_unused_tags(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    unused = store.create_tag("临时空标签", kind="business")
+    used = store.create_tag("已有历史标签", kind="service")
+    store.create_mapping("tagged@example.com", category=used.name)
+
+    store.delete_tag(unused.id)
+
+    assert store.get_tag(unused.id) is None
+    with pytest.raises(ValueError, match="tag is in use"):
+        store.delete_tag(used.id)
+    assert store.get_tag(used.id) is not None
+
+
+def test_delete_tag_rejects_system_tags(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    system_tag = store.ensure_independent_system_tag()
+
+    with pytest.raises(ValueError, match="system tag cannot be deleted"):
+        store.delete_tag(system_tag.id)

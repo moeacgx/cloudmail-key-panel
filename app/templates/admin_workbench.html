@@ -6,9 +6,12 @@
   <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
     <div>
       <h2 class="card-title text-2xl">注册工作台</h2>
-      <p class="mt-2 text-sm text-base-content/60">按分类领取邮箱，在这里复制邮箱、等待验证码、改分类并切到下一个。</p>
+      <p class="mt-2 text-sm text-base-content/60">按使用状态和标签领取邮箱，成功接码后追加平台标签，不覆盖原有使用历史。</p>
     </div>
     <div class="flex flex-wrap gap-2">
+      <a class="btn btn-ghost btn-sm" href="/admin/cards">兑换卡管理</a>
+      <a class="btn btn-ghost btn-sm" href="/admin/tags">标签管理</a>
+      <a class="btn btn-ghost btn-sm" href="/admin/api">API 文档与调试</a>
       <a class="btn btn-ghost btn-sm" href="/admin">返回后台</a>
       <form method="post" action="/admin/logout">
         <button type="submit" class="btn btn-ghost btn-sm">退出登录</button>
@@ -16,32 +19,37 @@
     </div>
   </div>
 
-  <div class="mt-5 grid gap-4 lg:grid-cols-4 lg:items-end">
-    <label class="grid gap-2">
-      <span class="text-sm font-medium">分类范围</span>
+  <div class="mt-5 grid gap-4 lg:grid-cols-4 lg:items-start">
+    <label class="grid gap-2 lg:col-span-2">
+      <span class="text-sm font-medium">来源标签</span>
       <select class="select select-bordered w-full" data-workbench-category>
-        <option value="">全部分类</option>
+        <option value="">全部可用邮箱</option>
         {% for category_name in categories %}
           <option value="{{ category_name }}">{{ category_name }}</option>
         {% endfor %}
       </select>
     </label>
-    <label class="grid gap-2">
-      <span class="text-sm font-medium">目标站点备注</span>
-      <input class="input input-bordered w-full" type="text" data-workbench-target-site placeholder="例如：ChatGPT">
-    </label>
-    <label class="grid gap-2">
-      <span class="text-sm font-medium">完成后改为分类</span>
-      <select class="select select-bordered w-full" data-workbench-complete-category>
-        <option value="已使用">已使用</option>
-        <option value="GPT废号">GPT废号</option>
-        <option value="Pro20X">Pro20X</option>
-        <option value="__custom__">其他分类</option>
+    <label class="grid gap-2 lg:col-span-2">
+      <span class="text-sm font-medium">本次接码平台</span>
+      <select class="select select-bordered w-full" data-workbench-target-tag required aria-required="true">
+        <option value="" selected disabled>请选择平台标签</option>
+        {% for tag in platform_tags %}
+          <option value="{{ tag.id }}" data-tag-name="{{ tag.name }}">{{ tag.name }}</option>
+        {% endfor %}
       </select>
+      <span class="text-xs text-base-content/50">成功获取验证码后自动追加此平台标签，不覆盖邮箱已有标签。</span>
     </label>
-    <label class="grid gap-2" data-custom-complete-category-wrap hidden>
-      <span class="text-sm font-medium">其他分类名称</span>
-      <input class="input input-bordered w-full" type="text" data-workbench-complete-category-custom placeholder="输入自定义分类">
+    <fieldset class="rounded-box border border-base-300 p-3 lg:col-span-2" data-workbench-address-modes>
+      <legend class="px-2 text-sm font-medium">邮箱方式</legend>
+      <div class="flex flex-wrap gap-4">
+        <label class="label cursor-pointer justify-start gap-2"><input class="radio radio-sm" type="radio" name="workbench_address_mode" value="primary" checked><span>固定邮箱</span></label>
+        <label class="label cursor-pointer justify-start gap-2"><input class="radio radio-sm" type="radio" name="workbench_address_mode" value="icloud_alias"><span>iCloud 裂变邮箱</span></label>
+      </div>
+      <p class="mt-1 text-xs text-base-content/50">只有裂变模式允许同一主邮箱再次用于相同平台，每次都会生成全新地址。</p>
+    </fieldset>
+    <label class="flex cursor-pointer items-start gap-3 rounded-box border border-base-300 p-3 lg:col-span-2">
+      <input class="checkbox checkbox-primary mt-0.5" type="checkbox" data-workbench-private>
+      <span><strong class="block text-sm">禁止进入可复用邮箱池</strong><span class="mt-1 block text-xs text-base-content/50">成功接码后锁定整个邮箱族；如果邮箱已有使用历史，则记为“停止复用”，不会标记为隐私独立邮箱。</span></span>
     </label>
     <div class="flex flex-wrap gap-2 lg:col-span-4">
       <button type="button" class="btn btn-outline" data-claim-next>领取下一个</button>
@@ -49,7 +57,7 @@
     </div>
   </div>
 
-  <div class="alert mt-5" data-workbench-message>请选择分类范围后领取一个邮箱。</div>
+  <div class="alert mt-5" data-workbench-message>请选择来源标签和本次接码平台后领取邮箱。</div>
   </div>
 </section>
 
@@ -63,8 +71,8 @@
     <a class="btn btn-outline btn-sm" data-open-mailbox target="_blank" rel="noreferrer">打开完整前台</a>
   </div>
 
-  <div class="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-    <div class="grid gap-1">
+  <div class="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+    <div class="grid gap-1 lg:col-span-2">
       <span class="text-xs font-medium text-base-content/50">注册邮箱</span>
       <strong class="break-words" data-current-email></strong>
     </div>
@@ -77,84 +85,117 @@
       <code class="kbd kbd-sm w-fit" data-current-query-email></code>
     </div>
     <div class="grid gap-1">
-      <span class="text-xs font-medium text-base-content/50">备注 / 分类</span>
-      <span data-current-meta></span>
+      <span class="text-xs font-medium text-base-content/50">最新验证码</span>
+      <button type="button" class="inline-flex h-8 w-fit items-center justify-center rounded-field border border-error/40 bg-white px-3 font-mono text-sm font-bold tracking-wider text-error shadow-sm transition-colors hover:border-error hover:bg-white hover:text-error focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-error disabled:cursor-default disabled:opacity-60" data-current-code disabled>等待验证码…</button>
+    </div>
+    <div class="grid min-w-0 gap-1" data-current-meta-wrap>
+      <span class="text-xs font-medium text-base-content/50">备注 / 标签</span>
+      <span class="block min-w-0 max-w-full truncate" data-current-meta></span>
     </div>
   </div>
 
   <div class="mt-5 flex flex-wrap gap-2">
     <button type="button" class="btn btn-outline" data-copy-email>复制邮箱</button>
     <button type="button" class="btn btn-outline" data-copy-key>复制 Key</button>
-    <button type="button" class="btn btn-outline" data-mark-used>保存分类并下一个</button>
-    <button type="button" class="btn btn-ghost" data-skip-current>取消领取</button>
+    <button type="button" class="btn btn-outline" data-mark-used>确认接码并追加标签</button>
+    <button type="button" class="btn btn-ghost" data-skip-current>跳过当前邮箱</button>
   </div>
   </div>
 </section>
 
-<section class="card border border-base-300 bg-base-100" data-mailbox-panel hidden>
-  <div class="card-body">
-  <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-    <div>
-      <h2 class="card-title text-2xl">实时验证码</h2>
-      <p class="mt-2 text-sm text-base-content/60" data-mailbox-hint>页面会自动获取新邮件。</p>
-    </div>
-    <div class="badge badge-outline gap-2 p-3" data-workbench-loading hidden>
-      <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
-      <span>正在获取新邮件…</span>
-    </div>
+<div class="pointer-events-none fixed inset-0 z-50 flex items-center justify-center px-4" aria-live="polite" aria-atomic="true">
+  <div class="max-w-sm translate-y-2 rounded-full border border-base-100/20 bg-base-content/80 px-4 py-2 text-sm text-base-100 opacity-0 shadow-lg backdrop-blur-sm transition duration-200 ease-out" data-copy-toast aria-hidden="true">
+    验证码已复制
   </div>
-  <div class="mt-5" data-mailbox-output>
-    <div class="alert">领取邮箱后会在这里显示最近验证码邮件。</div>
-  </div>
-  </div>
-</section>
+</div>
 
 <script>
   (() => {
+    const PRIVATE_PREFERENCE_KEY = 'cloudmail-workbench-private-v1';
     const pollInterval = Number('{{ workbench_poll_interval_ms }}');
     const categoryInput = document.querySelector('[data-workbench-category]');
-    const targetSiteInput = document.querySelector('[data-workbench-target-site]');
-    const completeCategoryInput = document.querySelector('[data-workbench-complete-category]');
-    const completeCategoryCustomInput = document.querySelector('[data-workbench-complete-category-custom]');
-    const customCompleteCategoryWrap = document.querySelector('[data-custom-complete-category-wrap]');
+    const targetTagInput = document.querySelector('[data-workbench-target-tag]');
+    const privateEmailInput = document.querySelector('[data-workbench-private]');
+    const primaryModeInput = document.querySelector('input[name="workbench_address_mode"][value="primary"]');
+    const aliasModeInput = document.querySelector('input[name="workbench_address_mode"][value="icloud_alias"]');
     const messageBox = document.querySelector('[data-workbench-message]');
     const currentPanel = document.querySelector('[data-current-panel]');
-    const mailboxPanel = document.querySelector('[data-mailbox-panel]');
-    const loading = document.querySelector('[data-workbench-loading]');
-    const mailboxOutput = document.querySelector('[data-mailbox-output]');
-    const mailboxHint = document.querySelector('[data-mailbox-hint]');
     const currentStatus = document.querySelector('[data-current-status]');
     const currentEmail = document.querySelector('[data-current-email]');
     const currentKey = document.querySelector('[data-current-key]');
     const currentQueryEmail = document.querySelector('[data-current-query-email]');
+    const currentCode = document.querySelector('[data-current-code]');
     const currentMeta = document.querySelector('[data-current-meta]');
     const openMailbox = document.querySelector('[data-open-mailbox]');
+    const claimNextButton = document.querySelector('[data-claim-next]');
+    const markUsedButton = document.querySelector('[data-mark-used]');
+    const skipCurrentButton = document.querySelector('[data-skip-current]');
+    const copyToast = document.querySelector('[data-copy-toast]');
 
     let currentMapping = null;
     let poller = null;
+    let copyToastTimer = null;
 
-    const escapeHtml = (value) => String(value || '')
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&#39;');
+    const readPrivatePreference = () => {
+      try { return window.localStorage.getItem(PRIVATE_PREFERENCE_KEY) === 'true'; }
+      catch (_error) { return false; }
+    };
+
+    const applyPrivatePreference = (persist = false) => {
+      if (persist) {
+        try { window.localStorage.setItem(PRIVATE_PREFERENCE_KEY, privateEmailInput?.checked ? 'true' : 'false'); }
+        catch (_error) { /* 浏览器禁用本地存储时仍可继续当前操作。 */ }
+      }
+      const currentIsAlias = currentMapping?.address_kind === 'icloud_alias';
+      if (privateEmailInput?.checked && !currentIsAlias && primaryModeInput) primaryModeInput.checked = true;
+      if (aliasModeInput) aliasModeInput.disabled = Boolean(privateEmailInput?.checked && !currentIsAlias);
+    };
+
+    if (privateEmailInput) privateEmailInput.checked = readPrivatePreference();
+    applyPrivatePreference();
 
     const setMessage = (message, type = '') => {
       messageBox.textContent = message || '';
       messageBox.className = 'alert border border-base-content/20';
     };
 
-    const setLoading = (value) => {
-      if (loading) loading.hidden = !value;
+    const showCopyToast = (message) => {
+      if (!copyToast) return;
+      if (copyToastTimer) window.clearTimeout(copyToastTimer);
+      copyToast.textContent = message;
+      copyToast.setAttribute('aria-hidden', 'false');
+      copyToast.classList.remove('translate-y-2', 'opacity-0');
+      copyToast.classList.add('translate-y-0', 'opacity-90');
+      copyToastTimer = window.setTimeout(() => {
+        copyToast.classList.remove('translate-y-0', 'opacity-90');
+        copyToast.classList.add('translate-y-2', 'opacity-0');
+        copyToast.setAttribute('aria-hidden', 'true');
+        copyToastTimer = null;
+      }, 1600);
+    };
+
+    const truncateMetaPart = (value, maxLength = 16) => {
+      const normalized = String(value || '').trim();
+      return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}…` : normalized;
+    };
+
+    const setLatestCode = (code = '', emptyLabel = '等待验证码…') => {
+      const normalizedCode = String(code || '').trim();
+      currentCode.textContent = normalizedCode || emptyLabel;
+      currentCode.dataset.copyCode = normalizedCode;
+      currentCode.disabled = !normalizedCode;
+      currentCode.setAttribute(
+        'aria-label',
+        normalizedCode ? `复制最新验证码 ${normalizedCode}` : emptyLabel,
+      );
     };
 
     const formData = (extra = {}) => {
       const data = new FormData();
       data.set('category', categoryInput?.value || '');
-      data.set('target_site', targetSiteInput?.value || '');
-      data.set('complete_category', completeCategoryInput?.value || '已使用');
-      data.set('complete_category_custom', completeCategoryCustomInput?.value || '');
+      data.set('target_tag_id', targetTagInput?.value || '');
+      data.set('address_mode', document.querySelector('input[name="workbench_address_mode"]:checked')?.value || 'primary');
+      data.set('prevent_shared_pool', privateEmailInput?.checked ? 'true' : 'false');
       Object.entries(extra).forEach(([key, value]) => data.set(key, value));
       return data;
     };
@@ -196,96 +237,72 @@
 
     const startPolling = () => {
       stopPolling();
-      if (!currentMapping || pollInterval <= 0) return;
-      poller = window.setInterval(refreshMailbox, pollInterval);
+      if (!currentMapping?.target_tag_id || pollInterval <= 0) return;
+      poller = window.setInterval(refreshLatestCode, pollInterval);
     };
 
     const renderMapping = (mapping, restartPolling = true) => {
       currentMapping = mapping;
       if (!mapping) {
         currentPanel.hidden = true;
-        mailboxPanel.hidden = true;
-        mailboxOutput.innerHTML = '<div class="alert">领取邮箱后会在这里显示最近验证码邮件。</div>';
+        if (targetTagInput) targetTagInput.disabled = false;
+        applyPrivatePreference();
+        setLatestCode();
         stopPolling();
         return;
       }
 
       currentPanel.hidden = false;
-      mailboxPanel.hidden = false;
+      if (mapping.address_kind === 'icloud_alias' && aliasModeInput) aliasModeInput.checked = true;
+      else if (primaryModeInput) primaryModeInput.checked = true;
+      applyPrivatePreference();
+      if (targetTagInput) {
+        const targetTagId = String(mapping.target_tag_id || '');
+        const matchingOption = targetTagId
+          ? Array.from(targetTagInput.options).find((option) => option.value === targetTagId)
+          : Array.from(targetTagInput.options).find((option) => option.dataset.tagName === mapping.target_site);
+        if (matchingOption) {
+          targetTagInput.value = matchingOption.value;
+          targetTagInput.disabled = true;
+        } else {
+          targetTagInput.value = '';
+          targetTagInput.disabled = false;
+        }
+      }
       currentStatus.textContent = mapping.status_label || mapping.status || '';
       currentStatus.className = `badge ${mapping.status === 'in_progress' ? 'badge-warning' : 'badge-success'}`;
       currentEmail.textContent = mapping.recipient_email || '';
       currentKey.textContent = mapping.access_key || '';
       currentQueryEmail.textContent = mapping.query_email || '';
-      currentMeta.textContent = [mapping.label, mapping.category, mapping.target_site].filter(Boolean).join(' / ') || '未设置';
+      const mappingTags = Array.isArray(mapping.tags)
+        ? mapping.tags.map((tag) => typeof tag === 'string' ? tag : tag.name).filter(Boolean)
+        : [];
+      const fullMeta = [mapping.label, ...(mappingTags.length ? mappingTags : [mapping.category]), mapping.target_site].filter(Boolean).join(' / ');
+      currentMeta.textContent = [
+        truncateMetaPart(mapping.label),
+        ...(mappingTags.length ? mappingTags : [mapping.category]),
+        truncateMetaPart(mapping.target_site),
+      ].filter(Boolean).join(' / ') || '未设置';
+      currentMeta.title = fullMeta;
       openMailbox.href = mapping.mailbox_url || '#';
+      setLatestCode();
       if (restartPolling) startPolling();
     };
 
-    const renderMailbox = (payload) => {
+    const renderLatestCode = (payload) => {
       if (!payload.mapping) {
         renderMapping(null);
-        mailboxOutput.innerHTML = '<div class="alert">当前没有注册中的邮箱。</div>';
         setMessage('当前领取已释放，请重新领取一个邮箱。');
         return;
       }
-      if (!currentMapping || currentMapping.id !== payload.mapping.id || currentMapping.status !== payload.mapping.status) {
+      const platformChanged = String(currentMapping?.target_tag_id || '') !== String(payload.mapping.target_tag_id || '');
+      if (!currentMapping || currentMapping.id !== payload.mapping.id || currentMapping.status !== payload.mapping.status || platformChanged) {
         renderMapping(payload.mapping, false);
+        if (platformChanged) startPolling();
       } else {
         currentMapping = payload.mapping;
       }
-      if (payload.display_timezone) {
-        mailboxHint.textContent = `页面会自动获取新邮件，当前按 ${payload.display_timezone} 显示时间。`;
-      }
-      if (payload.error) {
-        mailboxOutput.innerHTML = `<div class="alert border border-base-content/20">${escapeHtml(payload.error)}</div>`;
-        return;
-      }
-      if (payload.notice) {
-        mailboxOutput.innerHTML = `<div class="alert">${escapeHtml(payload.notice)}</div>`;
-        return;
-      }
-      if (!payload.emails?.length) {
-        mailboxOutput.innerHTML = '<div class="alert">当前没有查到邮件。</div>';
-        return;
-      }
-
-      mailboxOutput.innerHTML = `
-        <div class="grid gap-4">
-          ${payload.emails.map((email) => `
-            <article class="card border border-base-300 bg-base-100">
-              <div class="card-body gap-4">
-              <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                <h3 class="text-lg font-semibold">${escapeHtml(email.subject || '无主题')}</h3>
-                <span class="text-sm text-base-content/50">${escapeHtml(email.display_create_time || '')}</span>
-              </div>
-              <div class="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <span class="text-xs font-medium uppercase text-base-content/50">发件人</span>
-                  <p class="break-words">${escapeHtml(email.send_email || '未知')}</p>
-                </div>
-                <div>
-                  <span class="text-xs font-medium uppercase text-base-content/50">收件人</span>
-                  <p class="break-words">${escapeHtml(email.to_email || '')}</p>
-                </div>
-              </div>
-              <div class="flex flex-wrap gap-2">
-                ${email.codes?.length
-                  ? email.codes.map((code) => `<button type="button" class="badge badge-outline badge-lg font-mono" data-copy-code="${escapeHtml(code)}">${escapeHtml(code)}</button>`).join('')
-                  : '<span class="badge badge-ghost">未提取到明显验证码</span>'}
-              </div>
-              <div class="grid gap-2">
-                <div class="line-clamp-4 whitespace-pre-wrap rounded-box bg-base-200 p-3 text-sm leading-6 text-base-content/70">${escapeHtml(email.preview || '')}</div>
-                <details class="collapse collapse-arrow border border-base-300 bg-base-100">
-                  <summary class="collapse-title min-h-0 py-3 text-sm font-medium">展开完整邮件内容</summary>
-                  <div class="collapse-content whitespace-pre-wrap text-sm leading-6 text-base-content/70">${escapeHtml(email.preview || '')}</div>
-                </details>
-              </div>
-              </div>
-            </article>
-          `).join('')}
-        </div>
-      `;
+      setLatestCode(payload.latest_code, payload.error ? '获取失败' : '等待验证码…');
     };
 
     const loadCurrent = async () => {
@@ -294,27 +311,46 @@
         const payload = await requestJson(`/api/workbench/current?category=${category}`);
         renderMapping(payload.mapping);
         setMessage(payload.message || '');
-        if (payload.mapping) await refreshMailbox();
+        if (payload.mapping?.target_tag_id) await refreshLatestCode();
       } catch (error) {
         setMessage(error.message, 'error');
       }
     };
 
-    async function refreshMailbox() {
+    async function refreshLatestCode() {
       if (!currentMapping) return;
-      setLoading(true);
+      if (!currentMapping.target_tag_id && !targetTagInput?.value) {
+        setMessage('请先选择本次接码平台，再刷新验证码。', 'error');
+        targetTagInput?.focus();
+        return;
+      }
+      const requestedMappingId = currentMapping.id;
       try {
         const category = encodeURIComponent(categoryInput?.value || '');
-        const payload = await requestJson(`/api/workbench/current/mailbox?category=${category}`);
-        renderMailbox(payload);
+        const targetTagId = targetTagInput?.value || '';
+        const targetTagQuery = targetTagId ? `&target_tag_id=${encodeURIComponent(targetTagId)}` : '';
+        const payload = await requestJson(`/api/workbench/current/mailbox?category=${category}${targetTagQuery}`);
+        if (!currentMapping || currentMapping.id !== requestedMappingId) return;
+        renderLatestCode(payload);
       } catch (error) {
-        mailboxOutput.innerHTML = `<div class="alert border border-base-content/20">${escapeHtml(error.message)}</div>`;
-      } finally {
-        setLoading(false);
+        if (!currentCode.dataset.copyCode) setLatestCode('', '获取失败');
+        if (!currentMapping?.target_tag_id) setMessage(error.message, 'error');
       }
     }
 
     const claimNext = async () => {
+      if (!targetTagInput?.value) {
+        setMessage('请先选择本次接码平台。', 'error');
+        targetTagInput?.focus();
+        return;
+      }
+      const originalLabel = claimNextButton?.textContent || '';
+      [claimNextButton, markUsedButton, skipCurrentButton].forEach((button) => {
+        if (button) button.disabled = true;
+      });
+      if (claimNextButton) claimNextButton.textContent = '领取中…';
+      setMessage(currentMapping ? '正在释放当前邮箱并领取下一个…' : '正在领取下一个邮箱…');
+
       try {
         const payload = await requestJson('/api/workbench/claim-next', {
           method: 'POST',
@@ -322,15 +358,41 @@
         });
         renderMapping(payload.mapping);
         setMessage(payload.message || '', payload.mapping ? 'success' : '');
-        if (payload.mapping) await refreshMailbox();
+        if (payload.mapping) await refreshLatestCode();
       } catch (error) {
         await loadCurrent();
         setMessage(error.message, 'error');
+      } finally {
+        [claimNextButton, markUsedButton, skipCurrentButton].forEach((button) => {
+          if (button) button.disabled = false;
+        });
+        if (claimNextButton) claimNextButton.textContent = originalLabel;
       }
     };
 
-    const completeCurrent = async (url) => {
-      if (!currentMapping) return;
+    const completeCurrent = async (url, actionButton, pendingLabel) => {
+      if (!currentMapping) {
+        setMessage('当前没有可处理的邮箱，请先领取一个。', 'error');
+        return;
+      }
+      if (!targetTagInput?.value) {
+        setMessage('请先选择本次接码平台。', 'error');
+        targetTagInput?.focus();
+        return;
+      }
+
+      const isCompletion = url.endsWith('/mark-used');
+      if (isCompletion && !currentCode.dataset.copyCode) {
+        setMessage('只有成功获取验证码后才能追加使用标签。', 'error');
+        return;
+      }
+      const originalLabel = actionButton?.textContent || '';
+      [claimNextButton, markUsedButton, skipCurrentButton].forEach((button) => {
+        if (button) button.disabled = true;
+      });
+      if (actionButton) actionButton.textContent = pendingLabel;
+      setMessage(isCompletion ? '正在记录成功接码并领取下一个…' : '正在取消领取…');
+
       try {
         const payload = await requestJson(url, {
           method: 'POST',
@@ -339,23 +401,20 @@
         renderMapping(payload.mapping);
         setMessage(payload.message || '', payload.mapping ? 'success' : '');
         if (payload.mapping) {
-          await refreshMailbox();
-        } else {
-          mailboxOutput.innerHTML = '<div class="alert">暂无下一个可领取邮箱。</div>';
+          await refreshLatestCode();
         }
       } catch (error) {
         setMessage(error.message, 'error');
+      } finally {
+        [claimNextButton, markUsedButton, skipCurrentButton].forEach((button) => {
+          if (button) button.disabled = false;
+        });
+        if (actionButton) actionButton.textContent = originalLabel;
       }
     };
 
-    const updateCustomCategoryVisibility = () => {
-      const isCustom = completeCategoryInput?.value === '__custom__';
-      if (customCompleteCategoryWrap) customCompleteCategoryWrap.hidden = !isCustom;
-      if (isCustom) completeCategoryCustomInput?.focus();
-    };
-
-    document.querySelector('[data-claim-next]')?.addEventListener('click', claimNext);
-    document.querySelector('[data-refresh-mailbox]')?.addEventListener('click', refreshMailbox);
+    claimNextButton?.addEventListener('click', claimNext);
+    document.querySelector('[data-refresh-mailbox]')?.addEventListener('click', refreshLatestCode);
     document.querySelector('[data-copy-email]')?.addEventListener('click', async () => {
       await copyText(currentMapping?.recipient_email || '');
       setMessage('邮箱已复制', 'success');
@@ -364,22 +423,28 @@
       await copyText(currentMapping?.access_key || '');
       setMessage('Key 已复制', 'success');
     });
-    document.querySelector('[data-mark-used]')?.addEventListener('click', () => {
-      completeCurrent('/api/workbench/current/mark-used');
+    markUsedButton?.addEventListener('click', () => {
+      completeCurrent('/api/workbench/current/mark-used', markUsedButton, '保存中…');
     });
-    document.querySelector('[data-skip-current]')?.addEventListener('click', () => {
-      completeCurrent('/api/workbench/current/skip');
+    skipCurrentButton?.addEventListener('click', () => {
+      completeCurrent('/api/workbench/current/skip', skipCurrentButton, '取消中…');
     });
-    completeCategoryInput?.addEventListener('change', updateCustomCategoryVisibility);
-    mailboxOutput?.addEventListener('click', async (event) => {
-      const button = event.target.closest('[data-copy-code]');
-      if (!button) return;
-      await copyText(button.dataset.copyCode || '');
-      setMessage('验证码已复制', 'success');
+    currentCode?.addEventListener('click', async () => {
+      const code = currentCode.dataset.copyCode || '';
+      if (!code) return;
+      try {
+        await copyText(code);
+        showCopyToast('验证码已复制');
+      } catch (error) {
+        setMessage('验证码复制失败，请手动复制。', 'error');
+      }
     });
     categoryInput?.addEventListener('change', loadCurrent);
+    targetTagInput?.addEventListener('change', () => {
+      if (currentMapping && !currentMapping.target_tag_id) refreshLatestCode();
+    });
+    privateEmailInput?.addEventListener('change', () => applyPrivatePreference(true));
 
-    updateCustomCategoryVisibility();
     loadCurrent();
   })();
 </script>

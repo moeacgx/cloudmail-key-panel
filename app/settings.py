@@ -21,6 +21,11 @@ class AppSettings:
     cloudmail_api_token: str | None = None
     lookup_email_limit: int = 10
     display_timezone: str = "UTC"
+    redemption_session_hours: int = 24
+    redemption_claim_minutes: int = 30
+    redemption_skip_limit: int = 3
+    redemption_skip_cooldown_minutes: int = 15
+    public_recent_mailbox_limit: int = 20
 
     @classmethod
     def from_env(cls) -> "AppSettings":
@@ -40,4 +45,22 @@ class AppSettings:
             cloudmail_api_token=os.getenv("CLOUDMAIL_API_TOKEN") or None,
             lookup_email_limit=int(os.getenv("LOOKUP_EMAIL_LIMIT", str(defaults.lookup_email_limit))),
             display_timezone=os.getenv("APP_DISPLAY_TIMEZONE", defaults.display_timezone),
+            redemption_session_hours=int(
+                os.getenv("REDEMPTION_SESSION_HOURS", str(defaults.redemption_session_hours))
+            ),
+            redemption_claim_minutes=int(
+                os.getenv("REDEMPTION_CLAIM_MINUTES", str(defaults.redemption_claim_minutes))
+            ),
+            redemption_skip_limit=int(
+                os.getenv("REDEMPTION_SKIP_LIMIT", str(defaults.redemption_skip_limit))
+            ),
+            redemption_skip_cooldown_minutes=int(
+                os.getenv(
+                    "REDEMPTION_SKIP_COOLDOWN_MINUTES",
+                    str(defaults.redemption_skip_cooldown_minutes),
+                )
+            ),
+            public_recent_mailbox_limit=int(
+                os.getenv("PUBLIC_RECENT_MAILBOX_LIMIT", str(defaults.public_recent_mailbox_limit))
+            ),
         )

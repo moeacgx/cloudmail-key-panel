@@ -9,7 +9,7 @@ from app.store import KeyStore
 class FakeCloudMailClient:
     def __init__(self, messages: list[CloudMailMessage] | None = None) -> None:
         self.calls: list[tuple[str, int]] = []
-        self.messages = messages or [
+        self.messages = [
             CloudMailMessage(
                 email_id=1,
                 send_email="noreply@tm.openai.com",
@@ -17,13 +17,13 @@ class FakeCloudMailClient:
                 subject="Your ChatGPT code is 330119",
                 to_email="",
                 to_name="buyer",
-                create_time="2026-04-18 14:59:00",
+                create_time="2099-01-01 00:00:00",
                 type=0,
                 content="<div>ChatGPT Log-in Code</div><div>330119</div>",
                 text="ChatGPT Log-in Code\n330119",
                 is_del=0,
             )
-        ]
+        ] if messages is None else messages
 
     def fetch_recent_emails(self, recipient_email: str, limit: int = 10) -> list[CloudMailMessage]:
         self.calls.append((recipient_email, limit))
@@ -66,7 +66,7 @@ class FakeCloudMailFactory:
                         subject="Your ChatGPT code is 330119",
                         to_email=recipient_email,
                         to_name="buyer",
-                        create_time="2026-04-18 14:59:00",
+                        create_time="2099-01-01 00:00:00",
                         type=0,
                         content="<div>ChatGPT Log-in Code</div><div>330119</div>",
                         text="ChatGPT Log-in Code\n330119",
@@ -373,14 +373,9 @@ def test_admin_dashboard_supports_key_search_pagination_and_category_filter(tmp_
     assert "第 2 / 2 页" in page_two_response.text
 
 
-def test_admin_category_selects_support_existing_and_custom_values(tmp_path) -> None:
+def test_admin_mapping_forms_use_one_compact_multi_tag_selector(tmp_path) -> None:
     store = KeyStore(tmp_path / "app.db")
-    store.create_mapping(
-        recipient_email="existing@example.com",
-        query_email="existing@example.com",
-        access_key="existing-key",
-        category="未使用",
-    )
+    unused_tag = store.create_tag("未使用", kind="business")
     settings = AppSettings(
         app_secret_key="test-secret",
         app_admin_username="admin",
@@ -401,17 +396,53 @@ def test_admin_category_selects_support_existing_and_custom_values(tmp_path) -> 
         data={
             "recipient_email": "custom@example.com",
             "query_email": "custom@example.com",
-            "category": "__custom__",
-            "category_custom": "Pro20X",
+            "tag_ids": str(unused_tag.id),
         },
         follow_redirects=True,
     )
 
-    assert 'data-category-select' in dashboard_response.text
-    assert 'option value="__custom__">其他分类' in dashboard_response.text
-    assert 'name="category_custom"' in dashboard_response.text
+    assert 'data-category-select' not in dashboard_response.text
+    assert "其他标签（可多选）" not in dashboard_response.text
+    assert "邮箱标签（可多选）" in dashboard_response.text
+    assert "全部标签" in dashboard_response.text
+    assert 'class="checkbox checkbox-xs"' in dashboard_response.text
     assert create_response.status_code == 200
-    assert any(mapping.recipient_email == "custom@example.com" and mapping.category == "Pro20X" for mapping in store.list_mappings())
+    created = next(mapping for mapping in store.list_mappings() if mapping.recipient_email == "custom@example.com")
+    assert created.category == "未使用"
+    assert [tag.id for tag in store.list_mapping_tags(created.id)] == [unused_tag.id]
+
+
+def test_admin_create_key_panel_is_collapsed_by_default_and_opens_after_create_error(tmp_path) -> None:
+    settings = AppSettings(
+        app_secret_key="test-secret",
+        app_admin_username="admin",
+        app_admin_password="pass123",
+        database_path=str(tmp_path / "app.db"),
+    )
+    client = TestClient(create_app(settings=settings, cloudmail_client=FakeCloudMailClient()))
+    client.post(
+        "/admin/login",
+        data={"username": "admin", "password": "pass123"},
+        follow_redirects=True,
+    )
+
+    dashboard_response = client.get("/admin")
+    assert dashboard_response.status_code == 200
+    assert "data-create-key-panel>" in dashboard_response.text
+    assert "data-create-key-panel open>" not in dashboard_response.text
+
+    error_response = client.post(
+        "/admin/keys",
+        data={
+            "recipient_email": "first@example.com\nsecond@example.com",
+            "query_email": "first@example.com",
+            "access_key": "cannot-share-one-key",
+        },
+    )
+
+    assert error_response.status_code == 400
+    assert "批量导入多个邮箱时不能自定义单个 Key" in error_response.text
+    assert "data-create-key-panel open>" in error_response.text
 
 
 def test_admin_can_reset_occupied_mapping_without_dashboard_navigation(tmp_path) -> None:
@@ -550,7 +581,7 @@ def test_admin_can_batch_create_keys_from_multiple_recipient_lines(tmp_path) -> 
     assert "已批量创建 3 个 Key" in response.text
     assert 'name="recipient_email"' in response.text
     assert "textarea-bordered" in response.text
-    assert "分类" in response.text
+    assert "邮箱标签（可多选）" in response.text
     assert store.count_mappings() == 3
     assert all(mapping.category == "ChatGPT" for mapping in store.list_mappings())
     assert {mapping.recipient_email for mapping in store.list_mappings()} == {
@@ -569,9 +600,9 @@ def test_admin_workbench_claims_mailbox_reads_codes_and_moves_to_next(tmp_path) 
                 send_email="noreply@tm.openai.com",
                 send_name="OpenAI",
                 subject="Your code is 330119",
-                to_email="",
+                to_email="first@example.com",
                 to_name="buyer",
-                create_time="2026-04-18 14:59:00",
+                create_time="2099-01-01 00:00:00",
                 type=0,
                 content="<div>Your code is 330119</div>",
                 text="Your code is 330119",
@@ -579,7 +610,11 @@ def test_admin_workbench_claims_mailbox_reads_codes_and_moves_to_next(tmp_path) 
             )
         ]
     )
+    verification_message = fake_cloudmail.messages[0]
+    fake_cloudmail.messages = []
     store = KeyStore(tmp_path / "app.db")
+    store.create_tag("ChatGPT", kind="business")
+    platform_tag = store.create_tag("GPT", kind="service")
     first = store.create_mapping(
         recipient_email="first@example.com",
         query_email="first@example.com",
@@ -622,11 +657,35 @@ def test_admin_workbench_claims_mailbox_reads_codes_and_moves_to_next(tmp_path) 
     assert workbench_response.status_code == 200
     assert "注册工作台" in workbench_response.text
     assert "领取下一个" in workbench_response.text
+    assert 'class="grid min-w-0 gap-1" data-current-meta-wrap' in workbench_response.text
+    assert 'class="block min-w-0 max-w-full truncate" data-current-meta' in workbench_response.text
+    assert "const truncateMetaPart = (value, maxLength = 16)" in workbench_response.text
+    assert "currentMeta.title = fullMeta" in workbench_response.text
+    assert 'rounded-field border border-error/40 bg-white' in workbench_response.text
+    assert 'text-error shadow-sm transition-colors hover:border-error hover:bg-white hover:text-error' in workbench_response.text
+    assert 'class="btn btn-sm' not in workbench_response.text.split('data-current-code')[0].rsplit('<button', 1)[-1]
+    assert "const renderLatestCode = (payload)" in workbench_response.text
+    assert "setLatestCode(payload.latest_code" in workbench_response.text
+    assert "实时验证码" not in workbench_response.text
+    assert "data-mailbox-output" not in workbench_response.text
+    assert 'class="pointer-events-none fixed inset-0 z-50 flex items-center justify-center' in workbench_response.text
+    assert "const showCopyToast = (message)" in workbench_response.text
+    assert "showCopyToast('验证码已复制')" in workbench_response.text
+    assert "setMessage('验证码已复制'" not in workbench_response.text
+    assert '<option value="" selected disabled>请选择平台标签</option>' in workbench_response.text
+    assert 'data-workbench-target-tag' in workbench_response.text
+    assert "data.set('target_tag_id', targetTagInput?.value || '');" in workbench_response.text
+    assert "setMessage('请先选择本次接码平台。', 'error');" in workbench_response.text
+    assert "complete_category" not in workbench_response.text
+    assert "cloudmail-workbench-private-v1" in workbench_response.text
+    assert "window.localStorage.setItem(PRIVATE_PREFERENCE_KEY" in workbench_response.text
+    assert "mapping.address_kind === 'icloud_alias'" in workbench_response.text
+    assert workbench_response.text.count("[claimNextButton, markUsedButton, skipCurrentButton].forEach") == 4
     assert current_response.json()["mapping"] is None
 
     claim_response = client.post(
         "/api/workbench/claim-next",
-        data={"category": "ChatGPT", "target_site": "ChatGPT"},
+        data={"category": "ChatGPT", "target_tag_id": str(platform_tag.id)},
     )
     claimed = claim_response.json()["mapping"]
 
@@ -638,38 +697,61 @@ def test_admin_workbench_claims_mailbox_reads_codes_and_moves_to_next(tmp_path) 
     assert claimed["mailbox_url"].endswith("/mailbox/first-key")
     assert store.get_by_id(first.id).status == "in_progress"
 
+    fake_cloudmail.messages = [verification_message]
     mailbox_response = client.get("/api/workbench/current/mailbox?category=ChatGPT")
     mailbox_payload = mailbox_response.json()
 
     assert mailbox_response.status_code == 200
     assert mailbox_payload["mapping"]["id"] == first.id
-    assert mailbox_payload["emails"][0]["codes"] == ["330119"]
-    assert mailbox_payload["emails"][0]["to_email"] == "first@example.com"
+    assert mailbox_payload["latest_code"] == "330119"
+    assert "emails" not in mailbox_payload
+    assert "display_timezone" not in mailbox_payload
     assert fake_cloudmail.calls[-1] == ("first@example.com", 5)
+
+    invalid_platform_response = client.post(
+        "/api/workbench/current/mark-used",
+        data={
+            "mapping_id": str(first.id),
+            "category": "ChatGPT",
+            "target_tag_id": "999999",
+        },
+    )
+
+    assert invalid_platform_response.status_code == 400
+    assert invalid_platform_response.json()["error"] == "请选择有效的平台标签"
+    assert store.get_by_id(first.id).status == "in_progress"
+    assert store.get_by_id(first.id).category == "ChatGPT"
 
     mark_used_response = client.post(
         "/api/workbench/current/mark-used",
         data={
             "mapping_id": str(first.id),
             "category": "ChatGPT",
-            "target_site": "ChatGPT",
-            "complete_category": "已使用",
+            "target_tag_id": str(platform_tag.id),
         },
     )
     mark_used_payload = mark_used_response.json()
 
     assert mark_used_response.status_code == 200
     assert mark_used_payload["completed"]["status"] == "idle"
-    assert mark_used_payload["completed"]["category"] == "已使用"
+    assert mark_used_payload["completed"]["category"] == "ChatGPT"
     assert mark_used_payload["mapping"]["id"] == second.id
     assert mark_used_payload["mapping"]["status"] == "in_progress"
     assert store.get_by_id(first.id).status == "idle"
-    assert store.get_by_id(first.id).category == "已使用"
+    assert store.get_by_id(first.id).category == "ChatGPT"
     assert store.get_by_id(second.id).status == "in_progress"
+    assert {tag.name for tag in store.list_mapping_tags(first.id)} == {"ChatGPT", "GPT"}
+    assert store.count_verification_events(tag_id=platform_tag.id) == 1
 
+    # 第二条当前没有验证码，跳过才应只释放而不记录使用。
+    fake_cloudmail.messages = []
     skip_response = client.post(
         "/api/workbench/current/skip",
-        data={"mapping_id": str(second.id), "category": "ChatGPT", "target_site": "ChatGPT"},
+        data={
+            "mapping_id": str(second.id),
+            "category": "ChatGPT",
+            "target_tag_id": str(platform_tag.id),
+        },
     )
     skip_payload = skip_response.json()
 
@@ -682,7 +764,7 @@ def test_admin_workbench_claims_mailbox_reads_codes_and_moves_to_next(tmp_path) 
 
     reclaim_response = client.post(
         "/api/workbench/claim-next",
-        data={"category": "ChatGPT", "target_site": "ChatGPT"},
+        data={"category": "ChatGPT", "target_tag_id": str(platform_tag.id)},
     )
     reclaimed = reclaim_response.json()["mapping"]
 
@@ -703,33 +785,237 @@ def test_admin_workbench_claims_mailbox_reads_codes_and_moves_to_next(tmp_path) 
 
     reclaim_again_response = client.post(
         "/api/workbench/claim-next",
-        data={"category": "ChatGPT", "target_site": "ChatGPT"},
+        data={"category": "ChatGPT", "target_tag_id": str(platform_tag.id)},
     )
     assert reclaim_again_response.json()["mapping"]["id"] == second.id
 
-    complete_custom_response = client.post(
+    fake_cloudmail.messages = [
+        CloudMailMessage(
+            email_id=2,
+            send_email="noreply@tm.openai.com",
+            send_name="OpenAI",
+            subject="Your code is 440220",
+            to_email=second.recipient_email,
+            to_name="buyer",
+            create_time="2099-01-01 00:00:00",
+            type=0,
+            content="<div>Your code is 440220</div>",
+            text="Your code is 440220",
+            is_del=0,
+        )
+    ]
+    complete_second_response = client.post(
         "/api/workbench/current/mark-used",
         data={
             "mapping_id": str(second.id),
             "category": "ChatGPT",
-            "target_site": "ChatGPT",
-            "complete_category": "__custom__",
-            "complete_category_custom": "Pro20X",
+            "target_tag_id": str(platform_tag.id),
         },
     )
-    complete_custom_payload = complete_custom_response.json()
+    complete_second_payload = complete_second_response.json()
 
-    assert complete_custom_response.status_code == 200
-    assert complete_custom_payload["completed"]["status"] == "idle"
-    assert complete_custom_payload["completed"]["category"] == "Pro20X"
-    assert complete_custom_payload["mapping"] is None
+    assert complete_second_response.status_code == 200
+    assert complete_second_payload["completed"]["status"] == "idle"
+    assert complete_second_payload["completed"]["category"] == "ChatGPT"
+    assert complete_second_payload["mapping"] is None
     assert store.get_by_id(second.id).status == "idle"
-    assert store.get_by_id(second.id).category == "Pro20X"
+    assert store.get_by_id(second.id).category == "ChatGPT"
+    assert store.count_verification_events(tag_id=platform_tag.id) == 2
+
+
+def test_admin_workbench_all_categories_advances_after_completed_mapping(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    store.create_tag("gpt废号", kind="business")
+    platform_tag = store.create_tag("GPT", kind="service")
+    first = store.create_mapping(
+        recipient_email="first@example.com",
+        query_email="first@example.com",
+        access_key="first-key",
+        category="gpt废号",
+    )
+    second = store.create_mapping(
+        recipient_email="second@example.com",
+        query_email="second@example.com",
+        access_key="second-key",
+        category="gpt废号",
+    )
+    settings = AppSettings(
+        app_secret_key="test-secret",
+        app_admin_username="admin",
+        app_admin_password="pass123",
+        database_path=str(tmp_path / "app.db"),
+    )
+    app = create_app(
+        settings=settings,
+        store=store,
+        cloudmail_client=FakeCloudMailClient(
+            messages=[
+                CloudMailMessage(
+                    email_id=11,
+                    send_email="noreply@tm.openai.com",
+                    send_name="OpenAI",
+                    subject="Your code is 111111",
+                    to_email="first@example.com",
+                    to_name="",
+                    create_time="2099-01-01 00:01:00",
+                    type=0,
+                    content="<p>111111</p>",
+                    text="111111",
+                    is_del=0,
+                ),
+                CloudMailMessage(
+                    email_id=12,
+                    send_email="noreply@tm.openai.com",
+                    send_name="OpenAI",
+                    subject="Your code is 222222",
+                    to_email="second@example.com",
+                    to_name="",
+                    create_time="2099-01-01 00:02:00",
+                    type=0,
+                    content="<p>222222</p>",
+                    text="222222",
+                    is_del=0,
+                ),
+            ]
+        ),
+    )
+    fake_cloudmail = app.state.fixed_cloudmail_client
+    queued_messages = list(fake_cloudmail.messages)
+    fake_cloudmail.messages = []
+    client = TestClient(app)
+    client.post(
+        "/admin/login",
+        data={"username": "admin", "password": "pass123"},
+        follow_redirects=True,
+    )
+
+    workbench_response = client.get("/admin/workbench")
+    claim_response = client.post(
+        "/api/workbench/claim-next",
+        data={"category": "", "target_tag_id": str(platform_tag.id)},
+    )
+    assert workbench_response.status_code == 200
+    assert "正在记录成功接码并领取下一个" in workbench_response.text
+    assert 'value="gpt废号"' in workbench_response.text
+    assert 'value="GPT废号"' not in workbench_response.text
+    assert claim_response.json()["mapping"]["id"] == first.id
+
+    fake_cloudmail.messages = [queued_messages[0]]
+    first_complete_response = client.post(
+        "/api/workbench/current/mark-used",
+        data={
+            "mapping_id": str(first.id),
+            "category": "",
+            "target_tag_id": str(platform_tag.id),
+        },
+    )
+    first_complete_payload = first_complete_response.json()
+
+    assert first_complete_response.status_code == 200
+    assert first_complete_payload["completed"]["id"] == first.id
+    assert first_complete_payload["completed"]["category"] == "gpt废号"
+    assert first_complete_payload["mapping"]["id"] == second.id
+
+    fake_cloudmail.messages = queued_messages
+    second_complete_response = client.post(
+        "/api/workbench/current/mark-used",
+        data={
+            "mapping_id": str(second.id),
+            "category": "",
+            "target_tag_id": str(platform_tag.id),
+        },
+    )
+    second_complete_payload = second_complete_response.json()
+
+    assert second_complete_response.status_code == 200
+    assert second_complete_payload["completed"]["id"] == second.id
+    assert second_complete_payload["mapping"] is None
+    assert "暂无下一个可领取邮箱" in second_complete_payload["message"]
+    assert store.count_verification_events(tag_id=platform_tag.id) == 2
+
+
+def test_admin_workbench_claim_next_button_advances_current_mapping(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    platform_tag = store.create_tag("GPT", kind="service")
+    first = store.create_mapping(recipient_email="first@example.com", access_key="first-key")
+    second = store.create_mapping(recipient_email="second@example.com", access_key="second-key")
+    settings = AppSettings(
+        app_secret_key="test-secret",
+        app_admin_username="admin",
+        app_admin_password="pass123",
+        database_path=str(tmp_path / "app.db"),
+    )
+    client = TestClient(
+        create_app(settings=settings, store=store, cloudmail_client=FakeCloudMailClient(messages=[]))
+    )
+    client.post(
+        "/admin/login",
+        data={"username": "admin", "password": "pass123"},
+        follow_redirects=True,
+    )
+
+    claim_data = {"category": "", "target_tag_id": str(platform_tag.id)}
+    first_claim = client.post("/api/workbench/claim-next", data=claim_data).json()
+    second_claim = client.post("/api/workbench/claim-next", data=claim_data).json()
+    no_more = client.post("/api/workbench/claim-next", data=claim_data).json()
+
+    assert first_claim["mapping"]["id"] == first.id
+    assert second_claim["mapping"]["id"] == second.id
+    assert second_claim["message"] == "已跳过当前邮箱并领取下一个"
+    assert no_more["mapping"] is None
+    assert no_more["message"] == "当前邮箱已释放，暂无下一个可领取邮箱"
+    assert store.get_by_id(first.id).status == "idle"
+    assert store.get_by_id(second.id).status == "idle"
+
+
+def test_admin_workbench_switching_category_can_claim_an_earlier_mapping(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    store.create_tag("Category A", kind="business")
+    store.create_tag("Category B", kind="business")
+    platform_tag = store.create_tag("GPT", kind="service")
+    earlier_other_category = store.create_mapping(
+        recipient_email="earlier@example.com",
+        category="Category B",
+    )
+    current = store.create_mapping(
+        recipient_email="current@example.com",
+        category="Category A",
+    )
+    settings = AppSettings(
+        app_secret_key="test-secret",
+        app_admin_username="admin",
+        app_admin_password="pass123",
+        database_path=str(tmp_path / "app.db"),
+    )
+    client = TestClient(
+        create_app(settings=settings, store=store, cloudmail_client=FakeCloudMailClient(messages=[]))
+    )
+    client.post(
+        "/admin/login",
+        data={"username": "admin", "password": "pass123"},
+        follow_redirects=True,
+    )
+
+    first_claim = client.post(
+        "/api/workbench/claim-next",
+        data={"category": "Category A", "target_tag_id": str(platform_tag.id)},
+    )
+    switched_claim = client.post(
+        "/api/workbench/claim-next",
+        data={"category": "Category B", "target_tag_id": str(platform_tag.id)},
+    )
+
+    assert first_claim.json()["mapping"]["id"] == current.id
+    assert switched_claim.status_code == 200
+    assert switched_claim.json()["mapping"]["id"] == earlier_other_category.id
+    assert store.get_by_id(current.id).status == "idle"
 
 
 def test_admin_workbench_current_mapping_is_isolated_by_browser_session(tmp_path) -> None:
     fake_cloudmail = FakeCloudMailClient()
     store = KeyStore(tmp_path / "app.db")
+    store.create_tag("ChatGPT", kind="business")
+    platform_tag = store.create_tag("GPT", kind="service")
     first = store.create_mapping(
         recipient_email="first@example.com",
         query_email="first@example.com",
@@ -772,7 +1058,7 @@ def test_admin_workbench_current_mapping_is_isolated_by_browser_session(tmp_path
 
     first_claim_response = client_a.post(
         "/api/workbench/claim-next",
-        data={"category": "ChatGPT", "target_site": "ChatGPT"},
+        data={"category": "ChatGPT", "target_tag_id": str(platform_tag.id)},
     )
     first_claim = first_claim_response.json()["mapping"]
 
@@ -787,7 +1073,7 @@ def test_admin_workbench_current_mapping_is_isolated_by_browser_session(tmp_path
 
     second_claim_response = client_b.post(
         "/api/workbench/claim-next",
-        data={"category": "ChatGPT", "target_site": "ChatGPT"},
+        data={"category": "ChatGPT", "target_tag_id": str(platform_tag.id)},
     )
     second_claim = second_claim_response.json()["mapping"]
 
@@ -806,20 +1092,39 @@ def test_admin_workbench_current_mapping_is_isolated_by_browser_session(tmp_path
 
     b_skip_first_response = client_b.post(
         "/api/workbench/current/skip",
-        data={"mapping_id": str(first.id), "category": "ChatGPT"},
+        data={
+            "mapping_id": str(first.id),
+            "category": "ChatGPT",
+            "target_tag_id": str(platform_tag.id),
+        },
     )
 
     assert b_skip_first_response.status_code == 409
     assert b_skip_first_response.json()["message"] == "这个邮箱不是当前工作台领取的"
     assert store.get_by_id(first.id).status == "in_progress"
 
+    fake_cloudmail.messages = [
+        CloudMailMessage(
+            email_id=31,
+            send_email="noreply@tm.openai.com",
+            send_name="OpenAI",
+            subject="Your code is 313131",
+            to_email=first.recipient_email,
+            to_name="",
+            create_time="2099-01-01 00:01:00",
+            type=0,
+            content="<p>313131</p>",
+            text="313131",
+            is_del=0,
+        )
+    ]
+
     complete_first_response = client_a.post(
         "/api/workbench/current/mark-used",
         data={
             "mapping_id": str(first.id),
             "category": "ChatGPT",
-            "target_site": "ChatGPT",
-            "complete_category": "已使用",
+            "target_tag_id": str(platform_tag.id),
         },
     )
     complete_first_payload = complete_first_response.json()
@@ -831,12 +1136,15 @@ def test_admin_workbench_current_mapping_is_isolated_by_browser_session(tmp_path
     assert store.get_by_id(first.id).claimed_by == ""
     assert store.get_by_id(second.id).status == "in_progress"
     assert store.get_by_id(third.id).status == "in_progress"
+    assert store.count_verification_events(tag_id=platform_tag.id) == 1
     assert client_b.get("/api/workbench/current?category=ChatGPT").json()["mapping"]["id"] == second.id
 
 
 def test_workbench_current_mailbox_clears_after_external_reset(tmp_path) -> None:
     fake_cloudmail = FakeCloudMailClient()
     store = KeyStore(tmp_path / "app.db")
+    store.create_tag("ChatGPT", kind="business")
+    platform_tag = store.create_tag("GPT", kind="service")
     first = store.create_mapping(
         recipient_email="first@example.com",
         query_email="first@example.com",
@@ -864,7 +1172,7 @@ def test_workbench_current_mailbox_clears_after_external_reset(tmp_path) -> None
     workbench_response = client.get("/admin/workbench")
     claim_response = client.post(
         "/api/workbench/claim-next",
-        data={"category": "ChatGPT", "target_site": "ChatGPT"},
+        data={"category": "ChatGPT", "target_tag_id": str(platform_tag.id)},
     )
 
     assert workbench_response.status_code == 200
@@ -877,6 +1185,8 @@ def test_workbench_current_mailbox_clears_after_external_reset(tmp_path) -> None
 
     assert current_mailbox_response.status_code == 200
     assert current_mailbox_response.json()["mapping"] is None
+    assert current_mailbox_response.json()["latest_code"] is None
+    assert "emails" not in current_mailbox_response.json()
     assert current_response.json()["mapping"] is None
 
 
@@ -1276,3 +1586,206 @@ def test_mailbox_hides_shared_query_mailbox_messages_when_original_recipient_can
     assert "mixed-mailbox-message" not in response.text
     assert "330119" not in response.text
     assert "无法从 CloudMail 返回内容里识别原始收件人" in response.text
+
+
+def test_external_api_requires_basic_auth_and_client_id(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    store.create_mapping(recipient_email="first@example.com", category="未使用")
+    settings = AppSettings(
+        app_secret_key="test-secret",
+        app_admin_username="admin",
+        app_admin_password="pass123",
+        database_path=str(tmp_path / "app.db"),
+    )
+    client = TestClient(create_app(settings=settings, store=store, cloudmail_client=FakeCloudMailClient()))
+
+    unauthorized = client.get("/api/v1/categories")
+    wrong_password = client.get("/api/v1/categories", auth=("admin", "wrong"))
+
+    assert unauthorized.status_code == 401
+    assert unauthorized.headers["www-authenticate"].startswith("Basic ")
+    assert unauthorized.headers["cache-control"] == "no-store"
+    assert wrong_password.status_code == 401
+
+    categories_response = client.get("/api/v1/categories", auth=("admin", "pass123"))
+    categories = categories_response.json()["categories"]
+    assert categories_response.status_code == 200
+    assert categories_response.headers["cache-control"] == "no-store"
+    assert categories == [
+        {
+            "id": store.get_category_id("未使用"),
+            "name": "未使用",
+            "count": 1,
+        }
+    ]
+
+    missing_client_id = client.post(
+        "/api/v1/workbench/claim-next",
+        auth=("admin", "pass123"),
+        json={
+            "category_id": categories[0]["id"],
+            "target_tag_id": categories[0]["id"],
+        },
+    )
+    unknown_category = client.post(
+        "/api/v1/workbench/claim-next",
+        auth=("admin", "pass123"),
+        headers={"X-Client-ID": "worker-a"},
+        json={"category_id": 999999, "target_tag_id": categories[0]["id"]},
+    )
+
+    assert missing_client_id.status_code == 400
+    assert missing_client_id.json()["error"]["code"] == "client_id_required"
+    assert unknown_category.status_code == 404
+    assert unknown_category.json()["error"]["code"] == "source_tag_not_found"
+
+
+def test_external_api_claims_by_category_returns_full_mail_and_isolates_clients(tmp_path) -> None:
+    fake_cloudmail = FakeCloudMailClient(
+        messages=[
+            CloudMailMessage(
+                email_id=20,
+                send_email="other@example.com",
+                send_name="Other",
+                subject="Other code 998877",
+                to_email="shared@example.com",
+                to_name="",
+                    create_time="2099-01-01 00:02:00",
+                type=0,
+                content="<p>Original Recipient: other@example.com</p><p>998877</p>",
+                text="Original Recipient: other@example.com\n998877",
+                is_del=0,
+            ),
+            CloudMailMessage(
+                email_id=19,
+                send_email="noreply@tm.openai.com",
+                send_name="OpenAI",
+                subject="Your verification code is 112233",
+                to_email="shared@example.com",
+                to_name="First",
+                    create_time="2099-01-01 00:01:00",
+                type=0,
+                content="<p>Original Recipient: first@example.com</p><strong>112233</strong>",
+                text="Original Recipient: first@example.com\nYour verification code is 112233",
+                is_del=0,
+            ),
+        ]
+    )
+    queued_messages = list(fake_cloudmail.messages)
+    fake_cloudmail.messages = []
+    store = KeyStore(tmp_path / "app.db")
+    store.create_tag("未使用", kind="business")
+    platform_tag = store.create_tag("GPT", kind="service")
+    first = store.create_mapping(
+        recipient_email="first@example.com",
+        query_email="shared@example.com",
+        access_key="first-key",
+        category="未使用",
+    )
+    second = store.create_mapping(
+        recipient_email="second@example.com",
+        access_key="second-key",
+        category="未使用",
+    )
+    third = store.create_mapping(
+        recipient_email="third@example.com",
+        access_key="third-key",
+        category="未使用",
+    )
+    store.create_mapping(recipient_email="waste@example.com", category="gpt废号")
+    settings = AppSettings(
+        app_secret_key="test-secret",
+        app_admin_username="admin",
+        app_admin_password="pass123",
+        database_path=str(tmp_path / "app.db"),
+        lookup_email_limit=5,
+    )
+    client = TestClient(create_app(settings=settings, store=store, cloudmail_client=fake_cloudmail))
+    auth = ("admin", "pass123")
+    worker_a = {"X-Client-ID": "worker-a"}
+    worker_b = {"X-Client-ID": "worker-b"}
+    source_category_id = store.get_category_id("未使用")
+    assert source_category_id is not None
+
+    first_claim = client.post(
+        "/api/v1/workbench/claim-next",
+        auth=auth,
+        headers=worker_a,
+        json={"category_id": source_category_id, "target_tag_id": platform_tag.id},
+    )
+    first_payload = first_claim.json()
+
+    assert first_claim.status_code == 200
+    assert first_payload["mapping"]["id"] == first.id
+    assert first_payload["mapping"]["registration_email"] == "first@example.com"
+    assert first_payload["mapping"]["category_id"] == source_category_id
+    assert "access_key" not in first_payload["mapping"]
+    assert "query_email" not in first_payload["mapping"]
+    assert first_payload["registration_email"] == "first@example.com"
+    fake_cloudmail.messages = queued_messages
+    first_payload = client.get(
+        "/api/v1/workbench/current",
+        auth=auth,
+        headers=worker_a,
+    ).json()
+    assert first_payload["latest_code"] == "112233"
+    assert first_payload["latest_email"]["email_id"] == 19
+    assert first_payload["latest_email"]["subject"] == "Your verification code is 112233"
+    assert first_payload["latest_email"]["content"].endswith("<strong>112233</strong>")
+    assert first_payload["latest_email"]["text"].endswith("Your verification code is 112233")
+    assert first_payload["latest_email"]["detected_recipients"] == ["first@example.com"]
+
+    repeated_claim = client.post(
+        "/api/v1/workbench/claim-next",
+        auth=auth,
+        headers=worker_a,
+        json={"category_id": source_category_id, "target_tag_id": platform_tag.id},
+    )
+    second_client_claim = client.post(
+        "/api/v1/workbench/claim-next",
+        auth=auth,
+        headers=worker_b,
+        json={"category_id": source_category_id, "target_tag_id": platform_tag.id},
+    )
+    assert repeated_claim.json()["mapping"]["id"] == first.id
+    assert repeated_claim.json()["message"] == "已恢复当前领取的邮箱"
+    assert second_client_claim.json()["mapping"]["id"] == second.id
+    assert store.get_by_id(first.id).claimed_by != store.get_by_id(second.id).claimed_by
+
+    current_a = client.get("/api/v1/workbench/current", auth=auth, headers=worker_a)
+    current_b = client.get("/api/v1/workbench/current", auth=auth, headers=worker_b)
+    assert current_a.json()["mapping"]["id"] == first.id
+    assert current_b.json()["mapping"]["id"] == second.id
+
+    completed = client.post(
+        "/api/v1/workbench/complete",
+        auth=auth,
+        headers=worker_a,
+        json={
+            "mapping_id": first.id,
+            "category_id": source_category_id,
+        },
+    )
+    completed_payload = completed.json()
+    assert completed.status_code == 200
+    assert completed_payload["completed"]["id"] == first.id
+    assert completed_payload["completed"]["category_id"] == source_category_id
+    assert completed_payload["mapping"]["id"] == third.id
+    assert store.get_by_id(first.id).category == "未使用"
+    assert store.count_verification_events(tag_id=platform_tag.id) == 1
+    assert client.get("/api/v1/workbench/current", auth=auth, headers=worker_b).json()["mapping"]["id"] == second.id
+
+    skipped = client.post(
+        "/api/v1/workbench/skip-current",
+        auth=auth,
+        headers=worker_b,
+        json={
+            "mapping_id": second.id,
+            "category_id": source_category_id,
+        },
+    )
+    assert skipped.status_code == 200
+    assert skipped.json()["skipped"]["id"] == second.id
+    assert skipped.json()["mapping"] is None
+    assert store.get_by_id(second.id).status == "idle"
+    assert client.get("/api/v1/workbench/current", auth=auth, headers=worker_a).json()["mapping"]["id"] == third.id

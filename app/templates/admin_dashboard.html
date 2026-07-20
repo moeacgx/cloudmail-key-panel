@@ -6,7 +6,7 @@
   <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
     <div>
       <h2 class="card-title text-2xl">后台管理</h2>
-      <p class="mt-2 text-sm text-base-content/60">这里可以管理 CloudMail 配置、生成查看 Key，并按原始收件人邮箱给买家提供查询入口。</p>
+      <p class="mt-2 text-sm text-base-content/60">管理 CloudMail 配置、邮箱账号、多标签使用历史与查看 Key。</p>
     </div>
     <form method="post" action="/admin/logout">
       <button type="submit" class="btn btn-ghost btn-sm">退出登录</button>
@@ -49,6 +49,9 @@
 
   <div class="mt-4 flex flex-wrap gap-2">
     <a class="btn btn-outline btn-sm" href="/admin/workbench">打开注册工作台</a>
+    <a class="btn btn-outline btn-sm" href="/admin/cards">兑换卡管理</a>
+    <a class="btn btn-outline btn-sm" href="/admin/tags">邮箱标签</a>
+    <a class="btn btn-outline btn-sm" href="/admin/api">API 文档与调试</a>
     <button type="button" class="btn btn-outline btn-sm" data-cloudmail-config-trigger>编辑 CloudMail 配置</button>
   </div>
   </div>
@@ -103,14 +106,12 @@
   </dialog>
 </section>
 
-<section class="card border border-base-300 bg-base-100">
-  <div class="card-body">
-  <div>
-    <div>
-      <h2 class="card-title text-2xl">创建查看 Key</h2>
-      <p class="mt-2 text-sm text-base-content/60">原始收件人邮箱支持一行一个批量导入；批量创建时会自动为每个邮箱生成单独的 Key。</p>
-    </div>
-  </div>
+<details class="collapse collapse-arrow border border-base-300 bg-base-100" data-create-key-panel{% if create_key_form_open %} open{% endif %}>
+  <summary class="collapse-title px-6 py-5">
+    <h2 class="text-xl font-semibold">创建查看 Key</h2>
+  </summary>
+  <div class="collapse-content px-6 pb-6">
+    <p class="text-sm text-base-content/60">原始收件人邮箱支持一行一个批量导入；批量创建时会自动为每个邮箱生成单独的 Key。</p>
 
   <form method="post" action="/admin/keys" class="mt-5 grid gap-4">
     <label class="grid gap-2">
@@ -129,31 +130,33 @@
       <span class="text-sm font-medium">备注（可选）</span>
       <input class="input input-bordered w-full" type="text" name="label" placeholder="例如订单号 / 商品名">
     </label>
-    <label class="grid gap-2">
-      <span class="text-sm font-medium">分类（可选）</span>
-      <select class="select select-bordered w-full" name="category" data-category-select data-category-custom-target="create-category-custom">
-        <option value="">不设置分类</option>
-        {% for category_name in categories %}
-          <option value="{{ category_name }}">{{ category_name }}</option>
-        {% endfor %}
-        <option value="__custom__">其他分类</option>
-      </select>
-    </label>
-    <label id="create-category-custom" class="hidden grid gap-2">
-      <span class="text-sm font-medium">新分类名称</span>
-      <input class="input input-bordered w-full" type="text" name="category_custom" placeholder="输入新的分类名称">
-    </label>
+    {% if tags | default([]) %}
+      <fieldset class="grid gap-2">
+        <legend class="text-sm font-medium">邮箱标签（可多选）</legend>
+        <div class="flex flex-wrap gap-1.5 rounded-box border border-base-300 px-2 py-2">
+          {% for tag in tags %}
+            <label class="flex cursor-pointer items-center gap-1.5 rounded-field bg-base-200/70 px-2 py-1 text-sm hover:bg-base-200">
+              <input class="checkbox checkbox-xs" type="checkbox" name="tag_ids" value="{{ tag.id }}">
+              <span>{{ tag.name }}</span>
+            </label>
+          {% endfor %}
+        </div>
+        <span class="text-xs text-base-content/45">可同时选择多个标签；成功接码产生的平台标签会自动保留。</span>
+      </fieldset>
+    {% else %}
+      <p class="text-sm text-base-content/55">暂无可用标签，请先到“邮箱标签”中创建。</p>
+    {% endif %}
     <button type="submit" class="btn btn-outline">生成并保存</button>
   </form>
   </div>
-</section>
+</details>
 
 <section class="card border border-base-300 bg-base-100">
   <div class="card-body">
   <div>
     <div>
       <h2 class="card-title text-2xl">已创建的 Key</h2>
-      <p class="mt-2 text-sm text-base-content/60">当前共 {{ total_mappings }} 个 Key，可搜索、按分类筛选、翻页、批量删除、批量导出链接。</p>
+      <p class="mt-2 text-sm text-base-content/60">当前共 {{ total_mappings }} 个 Key，可搜索、按标签筛选、翻页、批量删除、批量导出链接。</p>
     </div>
   </div>
 
@@ -163,9 +166,9 @@
       <input class="input input-bordered w-full" type="text" name="q" value="{{ search_query }}" placeholder="输入关键词筛选">
     </label>
     <label class="grid gap-2 lg:col-span-3">
-      <span class="text-sm font-medium">分类筛选</span>
+      <span class="text-sm font-medium">标签筛选</span>
       <select class="select select-bordered w-full" name="category">
-        <option value="">全部分类</option>
+        <option value="">全部标签</option>
         {% for category_name in categories %}
           <option value="{{ category_name }}" {% if current_category == category_name %}selected{% endif %}>{{ category_name }}</option>
         {% endfor %}
@@ -207,7 +210,14 @@
                 <div class="flex flex-wrap items-center gap-2">
                   <strong class="break-all text-base sm:text-lg">{{ item.recipient_email }}</strong>
                   <span class="badge {% if item.status == 'in_progress' %}badge-warning{% else %}badge-success{% endif %}" data-mapping-status>{{ item.status_label }}</span>
-                  <span class="badge badge-outline">{{ item.category or '未分类' }}</span>
+                  {% if item.tags | default([]) %}
+                    {% for tag in item.tags %}<span class="badge badge-outline">{{ tag.name | default(tag) }}</span>{% endfor %}
+                  {% else %}
+                    <span class="badge badge-outline">{{ item.category or '无标签' }}</span>
+                  {% endif %}
+                  {% if item.reuse_policy | default('reusable') == 'independent' %}<span class="badge badge-info badge-outline">独立邮箱</span>{% endif %}
+                  {% if item.reuse_policy | default('reusable') == 'retired' %}<span class="badge badge-ghost">停止复用</span>{% endif %}
+                  <span class="badge badge-ghost">{{ '已成功接码' if item.first_used_at | default('') else '完全未使用' }}</span>
                 </div>
                 <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-base-content/50">
                   <span>ID {{ item.id }}</span>
@@ -245,7 +255,7 @@
                 data-query-email="{{ item.query_email }}"
                 data-access-key="{{ item.access_key }}"
                 data-label="{{ item.label }}"
-                data-category="{{ item.category }}"
+                data-tag-ids="{{ item.tag_ids | default([]) | join(',') }}"
               >编辑</button>
               {% if item.status == 'in_progress' %}
                 <button type="button" class="btn btn-ghost btn-sm" data-reset-status data-id="{{ item.id }}">取消占用</button>
@@ -306,20 +316,20 @@
             <span class="text-sm font-medium">备注</span>
             <input id="edit-label" class="input input-bordered w-full" type="text" name="label" placeholder="例如订单号 / 商品名">
           </label>
-          <label class="grid gap-2 sm:col-span-2">
-            <span class="text-sm font-medium">分类</span>
-            <select id="edit-category" class="select select-bordered w-full" name="category_value" data-category-select data-category-custom-target="edit-category-custom">
-              <option value="">不设置分类</option>
-              {% for category_name in categories %}
-                <option value="{{ category_name }}">{{ category_name }}</option>
-              {% endfor %}
-              <option value="__custom__">其他分类</option>
-            </select>
-          </label>
-          <label id="edit-category-custom" class="hidden grid gap-2 sm:col-span-2">
-            <span class="text-sm font-medium">新分类名称</span>
-            <input id="edit-category-custom-input" class="input input-bordered w-full" type="text" name="category_custom" placeholder="输入新的分类名称">
-          </label>
+          {% if tags | default([]) %}
+            <fieldset class="grid gap-2 sm:col-span-2">
+              <legend class="text-sm font-medium">邮箱标签（可多选）</legend>
+              <div class="flex flex-wrap gap-1.5 rounded-box border border-base-300 px-2 py-2">
+                {% for tag in tags %}
+                  <label class="flex cursor-pointer items-center gap-1.5 rounded-field bg-base-200/70 px-2 py-1 text-sm hover:bg-base-200">
+                    <input class="checkbox checkbox-xs" type="checkbox" name="tag_ids" value="{{ tag.id }}" data-edit-tag-choice>
+                    <span>{{ tag.name }}</span>
+                  </label>
+                {% endfor %}
+              </div>
+              <span class="text-xs text-base-content/45">成功接码产生的平台标签会自动保留，不能通过编辑邮箱移除。</span>
+            </fieldset>
+          {% endif %}
         </div>
         <div class="modal-action">
           <button type="submit" class="btn btn-outline">保存修改</button>
@@ -364,20 +374,6 @@
     const mappingForm = document.getElementById('mapping-edit-form');
     const exportOutput = document.getElementById('export-links-output');
 
-    const syncCategoryCustomInput = (select) => {
-      const target = document.getElementById(select.dataset.categoryCustomTarget || '');
-      if (!target) return;
-      const customInput = target.querySelector('input');
-      const isCustom = select.value === '__custom__';
-      target.classList.toggle('hidden', !isCustom);
-      if (customInput) customInput.required = isCustom;
-    };
-
-    document.querySelectorAll('[data-category-select]').forEach((select) => {
-      select.addEventListener('change', () => syncCategoryCustomInput(select));
-      syncCategoryCustomInput(select);
-    });
-
     const copyText = async (value) => {
       if (!value) return;
       if (navigator.clipboard?.writeText) {
@@ -404,8 +400,7 @@
       const queryInput = document.getElementById('edit-query-email');
       const keyInput = document.getElementById('edit-access-key');
       const labelInput = document.getElementById('edit-label');
-      const categoryInput = document.getElementById('edit-category');
-      const categoryCustomInput = document.getElementById('edit-category-custom-input');
+      const tagChoices = Array.from(mappingForm.querySelectorAll('[data-edit-tag-choice]'));
 
       document.querySelectorAll('[data-edit-key-trigger]').forEach((button) => {
         button.addEventListener('click', () => {
@@ -414,11 +409,8 @@
           queryInput.value = button.dataset.queryEmail || '';
           keyInput.value = button.dataset.accessKey || '';
           labelInput.value = button.dataset.label || '';
-          const category = button.dataset.category || '';
-          const optionExists = Array.from(categoryInput.options).some((option) => option.value === category);
-          categoryInput.value = optionExists ? category : '__custom__';
-          if (categoryCustomInput) categoryCustomInput.value = optionExists ? '' : category;
-          syncCategoryCustomInput(categoryInput);
+          const selectedTagIds = new Set((button.dataset.tagIds || '').split(',').filter(Boolean));
+          tagChoices.forEach((checkbox) => { checkbox.checked = selectedTagIds.has(checkbox.value); });
           mappingDialog.showModal();
         });
       });

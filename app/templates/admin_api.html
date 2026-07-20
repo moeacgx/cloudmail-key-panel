@@ -1,0 +1,520 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="card border border-base-300 bg-base-100">
+  <div class="card-body">
+    <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div>
+        <h2 class="card-title text-2xl">API 文档与调试</h2>
+        <p class="mt-2 text-sm text-base-content/60">查看稳定标签 ID、接口参数和返回字段，并直接调试真实 API。</p>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <a class="btn btn-ghost btn-sm" href="/admin/workbench">注册工作台</a>
+        <a class="btn btn-ghost btn-sm" href="/admin">返回后台</a>
+        <form method="post" action="/admin/logout">
+          <button type="submit" class="btn btn-ghost btn-sm">退出登录</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="mt-5 grid gap-3 lg:grid-cols-3">
+      <div class="rounded-box border border-base-300 bg-base-200/40 p-4 lg:col-span-2">
+        <div class="text-xs font-medium text-base-content/50">API 基础地址</div>
+        <code class="mt-2 block break-all font-mono text-sm" data-api-base-url>{{ api_base_url }}</code>
+      </div>
+      <div class="rounded-box border border-base-300 bg-base-200/40 p-4">
+        <div class="text-xs font-medium text-base-content/50">认证方式</div>
+        <div class="mt-2 font-medium">HTTP Basic</div>
+        <p class="mt-1 text-sm text-base-content/60">使用后台用户名和密码，每次请求都要认证。</p>
+      </div>
+      <div class="rounded-box border border-base-300 bg-base-200/40 p-4">
+        <div class="text-xs font-medium text-base-content/50">客户端隔离</div>
+        <code class="mt-2 block font-mono text-sm">X-Client-ID</code>
+        <p class="mt-1 text-sm text-base-content/60">同一程序固定使用同一个值，不同程序使用不同值。</p>
+      </div>
+      <div class="rounded-box border border-base-300 bg-base-200/40 p-4 lg:col-span-2">
+        <div class="text-xs font-medium text-base-content/50">安全要求</div>
+        <p class="mt-2 text-sm">只通过 HTTPS 调用。调试页不会保存密码，刷新页面后密码会清空。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="card border border-base-300 bg-base-100">
+  <div class="card-body">
+    <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <h2 class="card-title text-xl">标签 ID</h2>
+        <p class="mt-1 text-sm text-base-content/60">来源标签用于筛选邮箱池；接码平台只能选择平台标签。ID 永久稳定，标签为空时仍会保留。</p>
+      </div>
+      <span class="badge badge-outline">共 {{ category_options|length }} 个可用标签</span>
+    </div>
+
+    {% if category_options %}
+      <div class="mt-4 overflow-x-auto rounded-box border border-base-300">
+        <table class="table table-sm">
+          <thead>
+            <tr>
+              <th>标签 ID</th>
+              <th>标签名称</th>
+              <th class="text-right">邮箱数量</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for category in category_options %}
+              <tr>
+                <td><code class="kbd kbd-sm">{{ category.id }}</code></td>
+                <td class="min-w-48 break-words">{{ category.name }}</td>
+                <td class="text-right tabular-nums">{{ category.count }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="alert mt-4 border border-base-content/20">当前还没有标签，请先在标签管理中创建标签。</div>
+    {% endif %}
+
+    <div class="mt-4 rounded-box border border-base-300 bg-base-200/40 p-4 text-sm">
+      <div class="font-medium">可选接码平台标签</div>
+      {% if platform_tags %}
+        <div class="mt-2 flex flex-wrap gap-2">
+          {% for tag in platform_tags %}
+            <span class="badge badge-outline">#{{ tag.id }} · {{ tag.name }}</span>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="mt-2 text-base-content/60">暂无平台标签，请先在标签管理中创建“平台标签”。</p>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+<section class="space-y-3">
+  <div class="px-1">
+    <h2 class="text-xl font-semibold">API 接口</h2>
+    <p class="mt-1 text-sm text-base-content/60">点击接口可查看用途、请求参数和主要返回内容。</p>
+  </div>
+
+  <details class="collapse collapse-arrow border border-base-300 bg-base-100" open>
+    <summary class="collapse-title flex flex-wrap items-center gap-3 pr-12">
+      <span class="badge badge-info font-mono">GET</span>
+      <code class="break-all font-mono">/api/v1/tags</code>
+      <span class="text-sm text-base-content/60">获取标签 ID、类型、邮箱数、成功次数及裂变上限</span>
+    </summary>
+    <div class="collapse-content grid gap-3 px-6 pb-5 text-sm">
+      <p>不需要 <code class="font-mono">X-Client-ID</code>，但仍需 HTTP Basic 认证。</p>
+      <pre class="overflow-x-auto rounded-box bg-base-200 p-4 text-xs"><code>{
+  "tags": [
+    {"id": 4, "name": "Openai", "kind": "service", "count": 598, "success_count": 12, "prevent_reuse": false, "alias_use_limit": 5}
+  ]
+}</code></pre>
+    </div>
+  </details>
+
+  <details class="collapse collapse-arrow border border-base-300 bg-base-100">
+    <summary class="collapse-title flex flex-wrap items-center gap-3 pr-12">
+      <span class="badge badge-success font-mono">POST</span>
+      <code class="break-all font-mono">/api/v1/workbench/claim-next</code>
+      <span class="text-sm text-base-content/60">按分类领取注册邮箱</span>
+    </summary>
+    <div class="collapse-content grid gap-3 px-6 pb-5 text-sm">
+      <p>必须发送 <code class="font-mono">X-Client-ID</code>。同一客户端重复调用会恢复当前邮箱，不会误跳号。</p>
+      <pre class="overflow-x-auto rounded-box bg-base-200 p-4 text-xs"><code>{
+  "category_id": 4,
+  "target_tag_id": 2,
+  "address_mode": "icloud_alias"
+}</code></pre>
+      <p><code class="font-mono">category_id</code> 是来源标签，<code class="font-mono">target_tag_id</code> 必须是平台标签。成功获取验证码后，服务端会自动追加该平台标签。</p>
+      <p><code class="font-mono">address_mode</code> 可用 <code>primary</code> 或 <code>icloud_alias</code>。裂变模式支持同一主邮箱重复用于同一平台，但只有当前最新裂变地址可以实时轮询新邮件。</p>
+      <p>响应包含 <code class="font-mono">registration_email</code>、<code class="font-mono">latest_code</code>、<code class="font-mono">latest_email.subject</code>，以及完整的 <code class="font-mono">latest_email.content</code> 和 <code class="font-mono">latest_email.text</code>。</p>
+    </div>
+  </details>
+
+  <details class="collapse collapse-arrow border border-base-300 bg-base-100">
+    <summary class="collapse-title flex flex-wrap items-center gap-3 pr-12">
+      <span class="badge badge-info font-mono">GET</span>
+      <code class="break-all font-mono">/api/v1/workbench/current</code>
+      <span class="text-sm text-base-content/60">查询当前客户端领取</span>
+    </summary>
+    <div class="collapse-content grid gap-3 px-6 pb-5 text-sm">
+      <p>使用相同的 <code class="font-mono">X-Client-ID</code> 查询当前邮箱、最新验证码和最新完整邮件。</p>
+    </div>
+  </details>
+
+  <details class="collapse collapse-arrow border border-base-300 bg-base-100">
+    <summary class="collapse-title flex flex-wrap items-center gap-3 pr-12">
+      <span class="badge badge-warning font-mono">POST</span>
+      <code class="break-all font-mono">/api/v1/workbench/complete</code>
+      <span class="text-sm text-base-content/60">记录成功接码并领取下一条</span>
+    </summary>
+    <div class="collapse-content grid gap-3 px-6 pb-5 text-sm">
+      <pre class="overflow-x-auto rounded-box bg-base-200 p-4 text-xs"><code>{
+  "mapping_id": 123,
+  "category_id": 4,
+  "prevent_shared_pool": false
+}</code></pre>
+      <p>只有确实获取到验证码后才能完成。平台取自领取时的 <code class="font-mono">target_tag_id</code>，无需再次传入，成功事件与平台标签会原子写入。</p>
+      <p><code class="font-mono">prevent_shared_pool</code> 为 <code>true</code> 时将主邮箱设为禁止复用。</p>
+    </div>
+  </details>
+
+  <details class="collapse collapse-arrow border border-base-300 bg-base-100">
+    <summary class="collapse-title flex flex-wrap items-center gap-3 pr-12">
+      <span class="badge badge-warning font-mono">POST</span>
+      <code class="break-all font-mono">/api/v1/workbench/skip-current</code>
+      <span class="text-sm text-base-content/60">释放当前邮箱并领取下一条</span>
+    </summary>
+    <div class="collapse-content grid gap-3 px-6 pb-5 text-sm">
+      <pre class="overflow-x-auto rounded-box bg-base-200 p-4 text-xs"><code>{
+  "mapping_id": 123,
+  "category_id": 4,
+  "address_mode": "icloud_alias",
+  "prevent_shared_pool": false
+}</code></pre>
+      <p>服务端会先检查验证码：未到码时才释放；已经到码时会按领取时的平台标签记录成功，防止通过“跳过”绕过成功流水。</p>
+    </div>
+  </details>
+</section>
+
+<section class="card border border-warning/40 bg-base-100" data-api-debugger data-api-base="/api/v1">
+  <div class="card-body">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div>
+        <h2 class="card-title text-xl">调试演示</h2>
+        <p class="mt-1 text-sm text-base-content/60">这里调用的就是上面的真实 API，不是模拟数据。</p>
+      </div>
+      <span class="badge badge-warning badge-outline">生产数据</span>
+    </div>
+
+    <div class="alert mt-4 border border-warning/40 bg-warning/10 text-sm">
+      “获取标签”和“查询当前”只读；“领取、完成、跳过”会改变真实邮箱领取状态，请使用专用测试标签。
+    </div>
+
+    <form class="mt-5 grid gap-4" autocomplete="off" data-api-debug-form>
+      <fieldset class="grid gap-4 rounded-box border border-base-300 p-4 sm:grid-cols-2 lg:grid-cols-3">
+        <legend class="px-2 text-sm font-semibold">认证与客户端</legend>
+        <label class="grid gap-2">
+          <span class="text-sm font-medium">后台用户名</span>
+          <input class="input input-bordered w-full" type="text" value="{{ api_admin_username }}" autocomplete="off" spellcheck="false" data-api-username>
+        </label>
+        <label class="grid gap-2">
+          <span class="text-sm font-medium">后台密码</span>
+          <input class="input input-bordered w-full" type="password" value="" autocomplete="new-password" placeholder="仅保存在当前页面内存" data-api-password>
+        </label>
+        <label class="grid gap-2 sm:col-span-2 lg:col-span-1">
+          <span class="text-sm font-medium">X-Client-ID</span>
+          <input class="input input-bordered w-full font-mono" type="text" value="{{ debug_client_id }}" maxlength="128" autocomplete="off" spellcheck="false" data-api-client-id>
+        </label>
+      </fieldset>
+
+      <fieldset class="grid gap-4 rounded-box border border-base-300 p-4 sm:grid-cols-2 lg:grid-cols-5">
+        <legend class="px-2 text-sm font-semibold">请求参数</legend>
+        <label class="grid gap-2">
+          <span class="text-sm font-medium">来源标签 ID</span>
+          <select class="select select-bordered w-full" data-api-category-id>
+            <option value="" selected disabled>请选择来源标签</option>
+            {% for category in category_options %}
+              <option value="{{ category.id }}">#{{ category.id }} · {{ category.name }}（{{ category.count }}）</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="grid gap-2">
+          <span class="text-sm font-medium">本次接码平台</span>
+          <select class="select select-bordered w-full" data-api-target-tag-id>
+            <option value="" selected disabled>请选择平台标签</option>
+            {% for tag in platform_tags %}
+              <option value="{{ tag.id }}">#{{ tag.id }} · {{ tag.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="grid gap-2">
+          <span class="text-sm font-medium">mapping_id</span>
+          <input class="input input-bordered w-full" type="number" min="1" step="1" placeholder="领取后自动填入" data-api-mapping-id>
+        </label>
+        <label class="grid gap-2">
+          <span class="text-sm font-medium">邮箱方式</span>
+          <select class="select select-bordered w-full" data-api-address-mode>
+            <option value="primary">固定邮箱</option>
+            <option value="icloud_alias">iCloud 裂变邮箱</option>
+          </select>
+        </label>
+        <label class="flex cursor-pointer items-center gap-3 rounded-box border border-base-300 px-4 py-3">
+          <input class="checkbox" type="checkbox" data-api-prevent-shared-pool>
+          <span>
+            <span class="block text-sm font-medium">禁止进入复用池</span>
+            <span class="block text-xs text-base-content/50">完成或到码跳过时生效</span>
+          </span>
+        </label>
+      </fieldset>
+
+      <label class="flex cursor-pointer items-start gap-3 rounded-box border border-warning/30 bg-warning/5 p-4">
+        <input class="checkbox checkbox-warning mt-0.5" type="checkbox" data-api-mutation-confirm>
+        <span class="text-sm">我知道“领取、完成、跳过”会修改真实领取状态，并确认使用当前参数调试。</span>
+      </label>
+
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="btn btn-outline" data-api-action="tags">获取标签</button>
+        <button type="button" class="btn btn-outline" data-api-action="current">查询当前</button>
+        <button type="button" class="btn btn-warning btn-outline" data-api-action="claim">实际领取邮箱</button>
+        <button type="button" class="btn btn-warning btn-outline" data-api-action="complete">完成并领取下一个</button>
+        <button type="button" class="btn btn-warning btn-outline" data-api-action="skip">跳过并领取下一个</button>
+      </div>
+    </form>
+
+    <div class="mt-6 grid gap-4 lg:grid-cols-2">
+      <div class="min-w-0 rounded-box border border-base-300 bg-base-200/40 p-4">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <h3 class="font-semibold">cURL 演示</h3>
+            <p class="mt-1 text-xs text-base-content/50">密码始终使用占位符，不会写入示例。</p>
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm" data-copy-curl>复制</button>
+        </div>
+        <pre class="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-box bg-base-300 p-4 text-xs"><code data-curl-example></code></pre>
+      </div>
+
+      <div class="min-w-0 rounded-box border border-base-300 bg-base-200/40 p-4">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <h3 class="font-semibold">调试响应</h3>
+            <p class="mt-1 text-xs text-base-content/50" data-api-debug-status aria-live="polite">尚未调用</p>
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm" data-copy-response>复制</button>
+        </div>
+        <pre class="mt-3 max-h-96 min-h-40 overflow-auto whitespace-pre-wrap break-all rounded-box bg-base-300 p-4 text-xs"><code data-api-response>点击上方按钮开始调试。</code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  (() => {
+    const root = document.querySelector('[data-api-debugger]');
+    if (!root) return;
+
+    const form = root.querySelector('[data-api-debug-form]');
+    const usernameInput = root.querySelector('[data-api-username]');
+    const passwordInput = root.querySelector('[data-api-password]');
+    const clientIdInput = root.querySelector('[data-api-client-id]');
+    const categoryInput = root.querySelector('[data-api-category-id]');
+    const targetTagInput = root.querySelector('[data-api-target-tag-id]');
+    const mappingIdInput = root.querySelector('[data-api-mapping-id]');
+    const addressModeInput = root.querySelector('[data-api-address-mode]');
+    const preventSharedPoolInput = root.querySelector('[data-api-prevent-shared-pool]');
+    const mutationConfirm = root.querySelector('[data-api-mutation-confirm]');
+    const statusOutput = root.querySelector('[data-api-debug-status]');
+    const responseOutput = root.querySelector('[data-api-response]');
+    const curlOutput = root.querySelector('[data-curl-example]');
+    const actionButtons = Array.from(root.querySelectorAll('[data-api-action]'));
+    const mutatingActions = new Set(['claim', 'complete', 'skip']);
+    const apiBase = String(root.dataset.apiBase || '').replace(/\/$/, '');
+    const publicApiBase = `${window.location.origin}${apiBase}`;
+
+    const encodeBasicCredentials = (username, password) => {
+      const bytes = new TextEncoder().encode(`${username}:${password}`);
+      let binary = '';
+      bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+      return window.btoa(binary);
+    };
+
+    const readPositiveInteger = (input, label) => {
+      const rawValue = String(input?.value || '').trim();
+      const value = Number(rawValue);
+      if (!/^[1-9]\d*$/.test(rawValue) || !Number.isSafeInteger(value)) {
+        input?.focus();
+        throw new Error(`请填写正确的${label}。`);
+      }
+      return value;
+    };
+
+    const quoteShellArgument = (value) => {
+      const quote = "'";
+      const escapedQuote = `${quote}"${quote}"${quote}`;
+      return `${quote}${String(value).split(quote).join(escapedQuote)}${quote}`;
+    };
+
+    const buildRequest = (action) => {
+      const addressMode = String(addressModeInput?.value || 'primary');
+      const preventSharedPool = Boolean(preventSharedPoolInput?.checked);
+      if (action === 'tags') return { method: 'GET', path: '/tags' };
+      if (action === 'current') return { method: 'GET', path: '/workbench/current' };
+      const categoryId = readPositiveInteger(categoryInput, '来源标签 ID');
+      if (action === 'claim') {
+        return {
+          method: 'POST',
+          path: '/workbench/claim-next',
+          body: {
+            category_id: categoryId,
+            target_tag_id: readPositiveInteger(targetTagInput, '接码平台标签 ID'),
+            address_mode: addressMode,
+          },
+        };
+      }
+
+      const mappingId = readPositiveInteger(mappingIdInput, 'mapping_id');
+      if (action === 'complete') {
+        return {
+          method: 'POST',
+          path: '/workbench/complete',
+          body: {
+            mapping_id: mappingId,
+            category_id: categoryId,
+            prevent_shared_pool: preventSharedPool,
+          },
+        };
+      }
+
+      return {
+        method: 'POST',
+        path: '/workbench/skip-current',
+        body: {
+          mapping_id: mappingId,
+          category_id: categoryId,
+          address_mode: addressMode,
+          prevent_shared_pool: preventSharedPool,
+        },
+      };
+    };
+
+    const updateCurlExample = () => {
+      const categoryId = Number.parseInt(categoryInput?.value || '', 10);
+      const targetTagId = Number.parseInt(targetTagInput?.value || '', 10);
+      const addressMode = String(addressModeInput?.value || 'primary');
+      const clientId = String(clientIdInput?.value || 'YOUR_CLIENT_ID').trim() || 'YOUR_CLIENT_ID';
+      const sourceTag = Number.isInteger(categoryId) ? categoryId : 'YOUR_SOURCE_TAG_ID';
+      const platformTag = Number.isInteger(targetTagId) ? targetTagId : 'YOUR_PLATFORM_TAG_ID';
+      const body = Number.isInteger(categoryId) && Number.isInteger(targetTagId)
+        ? JSON.stringify({
+          category_id: categoryId,
+          target_tag_id: targetTagId,
+          address_mode: addressMode,
+        })
+        : `{"category_id":${sourceTag},"target_tag_id":${platformTag},"address_mode":${JSON.stringify(addressMode)}}`;
+      curlOutput.textContent = [
+        `curl -u ${quoteShellArgument('YOUR_ADMIN_USERNAME:YOUR_ADMIN_PASSWORD')}`,
+        `  -H ${quoteShellArgument(`X-Client-ID: ${clientId}`)}`,
+        `  -H ${quoteShellArgument('Content-Type: application/json')}`,
+        `  -d ${quoteShellArgument(body)}`,
+        `  ${quoteShellArgument(`${publicApiBase}/workbench/claim-next`)}`,
+      ].join(' \\\n');
+    };
+
+    const setBusy = (busy) => {
+      actionButtons.forEach((button) => { button.disabled = busy; });
+    };
+
+    const updateFormFromPayload = (payload) => {
+      const mapping = payload && typeof payload === 'object' ? payload.mapping : null;
+      if (payload && typeof payload === 'object' && Object.hasOwn(payload, 'mapping')) {
+        mappingIdInput.value = mapping?.id ? String(mapping.id) : '';
+      }
+      if (mapping?.category_id) categoryInput.value = String(mapping.category_id);
+      if (mapping?.target_tag_id) targetTagInput.value = String(mapping.target_tag_id);
+    };
+
+    const runAction = async (action) => {
+      try {
+        const username = String(usernameInput?.value || '').trim();
+        const password = String(passwordInput?.value || '');
+        const clientId = String(clientIdInput?.value || '').trim();
+        if (!username) {
+          usernameInput?.focus();
+          throw new Error('请填写后台用户名。');
+        }
+        if (!password) {
+          passwordInput?.focus();
+          throw new Error('请填写后台密码。');
+        }
+        if (action !== 'tags' && !clientId) {
+          clientIdInput?.focus();
+          throw new Error('请填写 X-Client-ID。');
+        }
+        const request = buildRequest(action);
+        if (mutatingActions.has(action)) {
+          if (!mutationConfirm?.checked) {
+            mutationConfirm?.focus();
+            throw new Error('请先勾选真实数据操作确认。');
+          }
+          if (!window.confirm('这个操作会改变真实邮箱领取状态，确认继续吗？')) return;
+        }
+
+        const headers = {
+          Accept: 'application/json',
+          Authorization: `Basic ${encodeBasicCredentials(username, password)}`,
+        };
+        if (action !== 'tags') headers['X-Client-ID'] = clientId;
+        if (request.body) headers['Content-Type'] = 'application/json';
+
+        setBusy(true);
+        statusOutput.textContent = `${request.method} ${request.path} · 请求中…`;
+        const startedAt = window.performance.now();
+        const response = await fetch(`${apiBase}${request.path}`, {
+          method: request.method,
+          headers,
+          body: request.body ? JSON.stringify(request.body) : undefined,
+          cache: 'no-store',
+          credentials: 'omit',
+        });
+        const elapsedMs = Math.round(window.performance.now() - startedAt);
+        const rawText = await response.text();
+        let payload;
+        try {
+          payload = rawText ? JSON.parse(rawText) : null;
+        } catch (_error) {
+          payload = { raw: rawText };
+        }
+
+        responseOutput.textContent = JSON.stringify(payload, null, 2);
+        statusOutput.textContent = `${response.status} ${response.statusText || ''} · ${elapsedMs} ms`;
+        statusOutput.className = response.ok
+          ? 'mt-1 text-xs text-success'
+          : 'mt-1 text-xs text-error';
+        updateFormFromPayload(payload);
+        updateCurlExample();
+      } catch (error) {
+        statusOutput.textContent = error.message || '调试请求失败。';
+        statusOutput.className = 'mt-1 text-xs text-error';
+      } finally {
+        setBusy(false);
+      }
+    };
+
+    const copyText = async (value) => {
+      if (!value) return;
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+        return;
+      }
+      const textarea = document.createElement('textarea');
+      textarea.value = value;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      textarea.remove();
+    };
+
+    actionButtons.forEach((button) => {
+      button.addEventListener('click', () => runAction(button.dataset.apiAction || ''));
+    });
+    root.querySelector('[data-copy-curl]')?.addEventListener('click', async () => {
+      await copyText(curlOutput.textContent || '');
+      statusOutput.textContent = 'cURL 示例已复制。';
+      statusOutput.className = 'mt-1 text-xs text-success';
+    });
+    root.querySelector('[data-copy-response]')?.addEventListener('click', async () => {
+      await copyText(responseOutput.textContent || '');
+      statusOutput.textContent = '调试响应已复制。';
+      statusOutput.className = 'mt-1 text-xs text-success';
+    });
+    [categoryInput, targetTagInput, addressModeInput, clientIdInput].forEach((input) => {
+      input?.addEventListener('input', updateCurlExample);
+      input?.addEventListener('change', updateCurlExample);
+    });
+    form?.addEventListener('submit', (event) => event.preventDefault());
+    updateCurlExample();
+  })();
+</script>
+{% endblock %}

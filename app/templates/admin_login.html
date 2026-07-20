@@ -10,11 +10,11 @@
   <form method="post" action="/admin/login" class="grid gap-4">
     <label class="grid gap-2">
       <span class="text-sm font-medium">用户名</span>
-      <input class="input input-bordered w-full" type="text" name="username" required>
+      <input class="input input-bordered w-full" type="text" name="username" autocomplete="username" required>
     </label>
     <label class="grid gap-2">
       <span class="text-sm font-medium">密码</span>
-      <input class="input input-bordered w-full" type="password" name="password" required>
+      <input class="input input-bordered w-full" type="password" name="password" autocomplete="current-password" required>
     </label>
     <button type="submit" class="btn btn-outline">登录后台</button>
   </form>

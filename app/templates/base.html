@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ settings.app_name }}</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='24' font-size='24'%3E%F0%9F%93%A7%3C/text%3E%3C/svg%3E">
   <link href="https://cdn.jsdelivr.net/npm/daisyui@5" rel="stylesheet" type="text/css">
   <link href="https://cdn.jsdelivr.net/npm/daisyui@5/themes.css" rel="stylesheet" type="text/css">
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
@@ -30,7 +31,7 @@
     <header class="relative mb-6 {% if header_centered %}flex flex-col items-center text-center{% else %}flex items-start justify-between gap-4{% endif %}">
       <div>
         <h1 class="text-3xl font-semibold tracking-tight">{{ settings.app_name }}</h1>
-        <p class="mt-2 text-sm text-base-content/60">按原始收件人邮箱绑定 Key，前台凭 Key 查看最近验证码邮件。</p>
+        <p class="mt-2 text-sm text-base-content/60">{{ page_subtitle | default('用兑换卡领取邮箱，安全便捷地查看最近验证码。') }}</p>
       </div>
       <button type="button" class="btn btn-ghost btn-square btn-sm absolute right-0 top-0" data-theme-toggle aria-label="切换亮暗模式" title="切换亮暗模式">
         <i data-lucide="moon" data-theme-toggle-icon aria-hidden="true"></i>

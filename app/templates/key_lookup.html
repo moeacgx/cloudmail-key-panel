@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="card mx-auto w-full max-w-xl border border-base-300 bg-base-100">
+  <div class="card-body gap-5">
+    <div>
+      <div class="mb-2"><a class="link link-hover text-sm text-base-content/55" href="/">← 返回兑换卡注册台</a></div>
+      <h2 class="card-title text-2xl">输入查看 Key</h2>
+      <p class="mt-2 text-sm text-base-content/60">输入后台发放的 Key，直接查看这个收件人邮箱最近收到的验证码邮件。</p>
+    </div>
+
+    {% if error %}<div class="alert alert-error border border-error/30">{{ error }}</div>{% endif %}
+
+    <form method="post" action="/lookup" class="grid gap-4">
+      <label class="grid gap-2">
+        <span class="text-sm font-medium">查看 Key</span>
+        <input class="input input-bordered w-full" type="text" name="access_key" placeholder="例如：demo-key-001" required autofocus>
+      </label>
+      <button type="submit" class="btn btn-primary">立即查看</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

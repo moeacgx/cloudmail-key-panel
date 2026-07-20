@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="card border border-base-300 bg-base-100">
+  <div class="card-body gap-5">
+    <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div>
+        <h2 class="card-title text-2xl">邮箱标签</h2>
+        <p class="mt-2 max-w-3xl text-sm leading-6 text-base-content/60">
+          一个主邮箱可同时拥有 Claude、Gemini、GPT 等多个标签。成功接码时只追加本次平台标签，不覆盖原有历史。
+        </p>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <a class="btn btn-ghost btn-sm" href="/admin/cards">兑换卡管理</a>
+        <a class="btn btn-ghost btn-sm" href="/admin/workbench">注册工作台</a>
+        <a class="btn btn-ghost btn-sm" href="/admin">返回后台</a>
+      </div>
+    </div>
+
+    {% if error %}<div class="alert alert-error border border-error/30">{{ error }}</div>{% endif %}
+    {% if message %}<div class="alert alert-success border border-success/30">{{ message }}</div>{% endif %}
+
+    <div class="alert border border-info/25 bg-info/5 text-sm">
+      <i data-lucide="shield-check" class="size-5 shrink-0" aria-hidden="true"></i>
+      <span><strong>标签可以全局保护独立账号。</strong>只要邮箱命中任意一个开启保护的标签，它就不会从其他标签或任意接码入口再次领取。</span>
+    </div>
+    <div class="alert border border-base-content/15 bg-base-200/40 text-sm">
+      <i data-lucide="chart-no-axes-column-increasing" class="size-5 shrink-0" aria-hidden="true"></i>
+      <span><strong>成功次数按真实接码流水统计。</strong>展示、复制、人工打标签、跳过和超时都不会计入；同一封验证码邮件重复刷新只记一次。</span>
+    </div>
+  </div>
+</section>
+
+<div class="grid gap-5 lg:grid-cols-[minmax(18rem,0.7fr)_minmax(0,1.3fr)]">
+  <section class="card h-fit border border-base-300 bg-base-100">
+    <div class="card-body gap-3">
+      <div>
+        <h2 class="card-title text-xl">创建标签</h2>
+        <p class="mt-1 text-sm text-base-content/55">建议按平台命名，例如 GPT、Claude、Gemini。</p>
+      </div>
+      <form method="post" action="/admin/tags" class="grid gap-4">
+        <label class="grid gap-2">
+          <span class="text-sm font-medium">标签名称</span>
+          <input class="input input-bordered w-full" name="name" maxlength="40" placeholder="例如：GPT" required>
+        </label>
+        <label class="grid gap-2">
+          <span class="text-sm font-medium">用途</span>
+          <select class="select select-bordered w-full" name="kind">
+            <option value="service">平台 / 服务</option>
+            <option value="business">业务备注</option>
+          </select>
+        </label>
+        <label class="flex cursor-pointer items-start gap-3 rounded-box border border-base-300 px-3 py-3">
+          <input class="checkbox checkbox-sm mt-0.5" type="checkbox" name="prevents_reuse" value="true">
+          <span>
+            <strong class="block text-sm">设为独立账号标签</strong>
+            <span class="mt-1 block text-xs leading-5 text-base-content/50">拥有该标签的邮箱将从全部自动领取入口排除，即使同时拥有其他来源标签也不会被领取。</span>
+          </span>
+        </label>
+        <label class="grid gap-2">
+          <span class="text-sm font-medium">单邮箱裂变接码上限</span>
+          <input class="input input-bordered w-full" type="number" name="alias_use_limit" value="0" min="0" step="1" inputmode="numeric">
+          <span class="text-xs leading-5 text-base-content/50">0 表示不限。每生成一个裂变邮箱就占用 1 次，跳过或超时也不会返还；达到上限后会自动换用其他主邮箱。</span>
+        </label>
+        <label class="grid gap-2">
+          <span class="text-sm font-medium">颜色</span>
+          <div class="flex items-center gap-3">
+            <input class="h-10 w-14 cursor-pointer rounded-field border border-base-300 bg-transparent p-1" type="color" name="color" value="#6366f1" data-tag-color>
+            <span class="badge text-white" style="background-color:#6366f1" data-tag-preview>预览</span>
+          </div>
+        </label>
+        <label class="grid gap-2">
+          <span class="text-sm font-medium">发件人规则（可选）</span>
+          <textarea class="textarea textarea-bordered min-h-24" name="sender_patterns" placeholder="一行一个，例如：&#10;@openai.com&#10;*@*.openai.com"></textarea>
+          <span class="text-xs leading-5 text-base-content/45">留空时会按标签名称启用常见平台的内置规则；手动填写后覆盖内置规则。支持完整邮箱、@域名和 * 通配符，并兼容 CloudMail 改写的 iCloud 发件人。</span>
+        </label>
+        <label class="grid gap-2">
+          <span class="text-sm font-medium">主题关键词（可选）</span>
+          <textarea class="textarea textarea-bordered min-h-24" name="subject_keywords" placeholder="一行一个，例如：&#10;ChatGPT&#10;verification code"></textarea>
+        </label>
+        <button class="btn btn-primary" type="submit">创建标签</button>
+      </form>
+    </div>
+  </section>
+
+  <section class="card border border-base-300 bg-base-100">
+    <div class="card-body gap-4">
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 class="card-title text-xl">已创建标签</h2>
+          <p class="mt-1 text-sm text-base-content/55">已使用的标签请归档保留历史；没有任何引用的标签可以彻底删除。</p>
+        </div>
+        <label class="input input-bordered input-sm flex items-center gap-2">
+          <i data-lucide="search" class="size-4 text-base-content/45" aria-hidden="true"></i>
+          <input type="search" placeholder="搜索标签" data-tag-search>
+        </label>
+      </div>
+
+      {% if tags | default([]) %}
+        <div class="grid gap-2" data-tag-list>
+          {% for tag in tags %}
+            <article class="rounded-box border border-base-300 px-3 py-2" data-tag-row data-tag-name="{{ tag.name | lower }}" data-tag-archived="{{ 'true' if tag.archived else 'false' }}">
+              <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <div class="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+                  <span class="badge badge-sm border-0 text-white" style="background-color:{{ tag.color or '#6366f1' }}">{{ tag.name }}</span>
+                  <span class="badge badge-ghost badge-sm">{{ '平台标签' if tag.kind | default('service') == 'service' else '业务标签' }}</span>
+                  {% if tag.kind | default('service') == 'service' %}<span class="badge badge-outline badge-sm">{{ '内置接码规则' if tag.uses_inferred_rule else '自定义接码规则' }}</span>{% endif %}
+                  {% if tag.prevents_reuse %}<span class="badge badge-outline badge-sm">独立账号</span>{% endif %}
+                  {% if tag.alias_use_limit %}<span class="badge badge-outline badge-sm">裂变上限 {{ tag.alias_use_limit }} 次/邮箱</span>{% endif %}
+                  {% if tag.archived %}<span class="badge badge-outline badge-sm">已归档</span>{% endif %}
+                  <span class="text-xs text-base-content/50">{{ tag.mapping_count | default(0) }} 个邮箱 · {{ tag.success_count | default(0) }} 次成功接码</span>
+                </div>
+                <div class="flex shrink-0 flex-wrap gap-1">
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-xs"
+                    data-edit-tag
+                    data-id="{{ tag.id }}"
+                    data-name="{{ tag.name }}"
+                    data-color="{{ tag.color or '#6366f1' }}"
+                    data-kind="{{ tag.kind | default('service') }}"
+                    data-sender-patterns="{{ tag.sender_patterns | default('') }}"
+                    data-subject-keywords="{{ tag.subject_keywords | default('') }}"
+                    data-prevents-reuse="{{ 'true' if tag.prevents_reuse else 'false' }}"
+                    data-alias-use-limit="{{ tag.alias_use_limit | default(0) }}"
+                    data-effective-rule-summary="{{ tag.effective_rule_summary }}"
+                  >编辑</button>
+                  <form method="post" action="/admin/tags/{{ tag.id }}/archive">
+                    <button type="submit" class="btn btn-ghost btn-xs">{{ '恢复' if tag.archived else '归档' }}</button>
+                  </form>
+                  <form method="post" action="/admin/tags/{{ tag.id }}/delete" onsubmit="return window.confirm('确定彻底删除这个标签吗？只有未被邮箱、接码流水或兑换卡引用的标签可以删除。');">
+                    <button type="submit" class="btn btn-ghost btn-xs text-error">删除</button>
+                  </form>
+                </div>
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="alert border border-base-content/15">还没有标签，先创建一个平台标签。</div>
+      {% endif %}
+    </div>
+  </section>
+</div>
+
+<dialog class="modal" data-edit-tag-dialog>
+  <div class="modal-box max-w-lg">
+    <div class="flex items-start justify-between gap-3">
+      <div><h3 class="text-lg font-semibold">编辑标签</h3><p class="mt-1 text-sm text-base-content/55">改名会同步更新所有邮箱的展示，历史流水保留不变。</p></div>
+      <button type="button" class="btn btn-ghost btn-sm" data-close-tag-dialog>关闭</button>
+    </div>
+    <form method="post" class="mt-5 grid gap-4" data-edit-tag-form>
+      <label class="grid gap-2"><span class="text-sm font-medium">标签名称</span><input class="input input-bordered" name="name" maxlength="40" data-edit-tag-name required></label>
+      <label class="grid gap-2"><span class="text-sm font-medium">用途</span><select class="select select-bordered" name="kind" data-edit-tag-kind><option value="service">平台 / 服务</option><option value="business">业务备注</option></select></label>
+      <label class="flex cursor-pointer items-start gap-3 rounded-box border border-base-300 px-3 py-3">
+        <input class="checkbox checkbox-sm mt-0.5" type="checkbox" name="prevents_reuse" value="true" data-edit-tag-prevents-reuse>
+        <span><strong class="block text-sm">设为独立账号标签</strong><span class="mt-1 block text-xs leading-5 text-base-content/50">开启后，该标签下邮箱不会进入任何自动领取池。</span></span>
+      </label>
+      <label class="grid gap-2">
+        <span class="text-sm font-medium">单邮箱裂变接码上限</span>
+        <input class="input input-bordered" type="number" name="alias_use_limit" min="0" step="1" inputmode="numeric" data-edit-tag-alias-use-limit required>
+        <span class="text-xs leading-5 text-base-content/50">0 表示不限。按主邮箱和当前平台分别累计生成次数；跳过或超时也计数，达到上限后自动换用其他主邮箱。</span>
+      </label>
+      <label class="grid gap-2"><span class="text-sm font-medium">颜色</span><input class="h-10 w-14 cursor-pointer rounded-field border border-base-300 bg-transparent p-1" type="color" name="color" data-edit-tag-color></label>
+      <div class="rounded-box border border-info/25 bg-info/5 px-3 py-2 text-xs leading-5 text-base-content/65" data-edit-tag-effective-rule></div>
+      <label class="grid gap-2"><span class="text-sm font-medium">发件人规则</span><textarea class="textarea textarea-bordered min-h-24" name="sender_patterns" data-edit-tag-senders></textarea><span class="text-xs leading-5 text-base-content/45">留空时按标签名称启用内置规则；填写后覆盖内置规则，并兼容 CloudMail 改写的 iCloud 发件人。</span></label>
+      <label class="grid gap-2"><span class="text-sm font-medium">主题关键词</span><textarea class="textarea textarea-bordered min-h-24" name="subject_keywords" data-edit-tag-subjects></textarea></label>
+      <div class="modal-action"><button type="submit" class="btn btn-primary">保存修改</button><button type="button" class="btn btn-ghost" data-close-tag-dialog>取消</button></div>
+    </form>
+  </div>
+  <form method="dialog" class="modal-backdrop"><button>关闭</button></form>
+</dialog>
+
+<script>
+  (() => {
+    const colorInput = document.querySelector('[data-tag-color]');
+    const colorPreview = document.querySelector('[data-tag-preview]');
+    colorInput?.addEventListener('input', () => { colorPreview.style.backgroundColor = colorInput.value; });
+
+    const search = document.querySelector('[data-tag-search]');
+    search?.addEventListener('input', () => {
+      const query = search.value.trim().toLocaleLowerCase('zh-CN');
+      document.querySelectorAll('[data-tag-row]').forEach((row) => {
+        row.hidden = Boolean(query) && !row.dataset.tagName.includes(query);
+      });
+    });
+
+    const dialog = document.querySelector('[data-edit-tag-dialog]');
+    const form = document.querySelector('[data-edit-tag-form]');
+    document.querySelectorAll('[data-edit-tag]').forEach((button) => button.addEventListener('click', () => {
+      form.action = `/admin/tags/${button.dataset.id}/update`;
+      form.querySelector('[data-edit-tag-name]').value = button.dataset.name || '';
+      form.querySelector('[data-edit-tag-kind]').value = button.dataset.kind || 'service';
+      form.querySelector('[data-edit-tag-color]').value = button.dataset.color || '#6366f1';
+      form.querySelector('[data-edit-tag-senders]').value = button.dataset.senderPatterns || '';
+      form.querySelector('[data-edit-tag-subjects]').value = button.dataset.subjectKeywords || '';
+      form.querySelector('[data-edit-tag-prevents-reuse]').checked = button.dataset.preventsReuse === 'true';
+      form.querySelector('[data-edit-tag-alias-use-limit]').value = button.dataset.aliasUseLimit || '0';
+      form.querySelector('[data-edit-tag-effective-rule]').textContent = button.dataset.effectiveRuleSummary || '';
+      dialog?.showModal();
+    }));
+    document.querySelectorAll('[data-close-tag-dialog]').forEach((button) => button.addEventListener('click', () => dialog?.close()));
+  })();
+</script>
+{% endblock %}

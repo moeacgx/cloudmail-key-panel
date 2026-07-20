@@ -1,0 +1,418 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="card min-w-0 border border-base-300 bg-base-100">
+  <div class="card-body min-w-0 gap-5">
+    <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div>
+        <h2 class="card-title text-2xl">兑换卡管理</h2>
+        <p class="mt-2 text-sm text-base-content/60">按批次生成兑换卡，固定可用次数、适用平台、邮箱来源和交付方式。</p>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <a class="btn btn-ghost btn-sm" href="/admin/tags">标签管理</a>
+        <a class="btn btn-ghost btn-sm" href="/admin/workbench">注册工作台</a>
+        <a class="btn btn-ghost btn-sm" href="/admin">返回后台</a>
+      </div>
+    </div>
+
+    {% if error %}<div class="alert alert-error border border-error/30">{{ error }}</div>{% endif %}
+    {% if message %}<div class="alert alert-success border border-success/30">{{ message }}</div>{% endif %}
+
+    <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div class="stat rounded-box border border-base-300 bg-base-100 px-5 py-4">
+        <div class="stat-title">兑换卡总数</div>
+        <div class="stat-value text-2xl">{{ card_summary.total | default(0) }}</div>
+      </div>
+      <div class="stat rounded-box border border-base-300 bg-base-100 px-5 py-4">
+        <div class="stat-title">可用</div>
+        <div class="stat-value text-2xl text-success">{{ card_summary.active | default(0) }}</div>
+      </div>
+      <div class="stat rounded-box border border-base-300 bg-base-100 px-5 py-4">
+        <div class="stat-title">已耗尽 / 过期</div>
+        <div class="stat-value text-2xl">{{ card_summary.exhausted | default(0) }}</div>
+      </div>
+      <div class="stat rounded-box border border-base-300 bg-base-100 px-5 py-4">
+        <div class="stat-title">已消耗次数</div>
+        <div class="stat-value text-2xl">{{ card_summary.consumed_uses | default(0) }}</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<details class="collapse collapse-arrow border border-base-300 bg-base-100">
+  <summary class="collapse-title text-lg font-semibold">兑换卡分类</summary>
+  <div class="collapse-content grid gap-4 pt-2">
+    <p class="text-sm text-base-content/55">分类只用于后台整理和导出兑换卡，不会当作邮箱的使用标签。</p>
+    <form method="post" action="/admin/card-categories" class="flex max-w-xl flex-col gap-2 sm:flex-row">
+      <input class="input input-bordered min-w-0 flex-1" name="name" maxlength="60" placeholder="例如：零售卡 / 渠道 A" required>
+      <button type="submit" class="btn btn-outline">创建分类</button>
+    </form>
+    {% if card_categories | default([]) %}
+      <div class="flex flex-wrap gap-2">
+        {% for category in card_categories %}<span class="badge badge-outline gap-1">{{ category.name }}<span class="opacity-55">{{ category.card_count | default(0) }}</span></span>{% endfor %}
+      </div>
+    {% endif %}
+  </div>
+</details>
+
+<details class="collapse collapse-arrow border border-base-300 bg-base-100" open data-create-card-batch>
+  <summary class="collapse-title text-lg font-semibold">创建兑换卡批次</summary>
+  <div class="collapse-content">
+    <form method="post" action="/admin/cards/batches" class="grid gap-5 pt-2" data-card-batch-form>
+      <div class="rounded-box border border-base-300 bg-base-200/40 p-4 text-sm text-base-content/65">
+        只需选择产品、库存和数量即可生成。批次名称、分类和领取策略均有默认值，可在高级设置中调整。
+      </div>
+
+      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <label class="grid gap-2">
+          <span class="text-sm font-medium">产品类型</span>
+          <select class="select select-bordered w-full" name="delivery_mode" data-product-type required>
+            <option value="independent">独立邮箱</option>
+            <option value="custom">定制邮箱</option>
+          </select>
+        </label>
+        <label class="grid gap-2" data-custom-only hidden>
+          <span class="text-sm font-medium">定制平台标签</span>
+          <select class="select select-bordered w-full" name="target_tag_id" data-service-tag required>
+            <option value="" selected disabled>请选择平台标签</option>
+            {% for tag in service_tags | default([]) %}
+              <option value="{{ tag.id }}">{{ tag.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="grid gap-2">
+          <span class="text-sm font-medium">邮箱库存标签</span>
+          <select class="select select-bordered w-full" name="source_tag_id" data-source-tag{% if inventory_tags | default([]) %} required{% endif %}>
+            {% if inventory_tags | default([]) %}
+              <option value="" selected disabled>请选择库存标签</option>
+              {% for tag in inventory_tags %}
+                <option value="{{ tag.id }}" data-count="{{ tag.count | default(0) }}">{{ tag.name }}（{{ tag.count | default(0) }} 个主邮箱）</option>
+              {% endfor %}
+            {% else %}
+              <option value="">暂无库存标签</option>
+            {% endif %}
+          </select>
+          <span class="text-xs text-base-content/45">只会从带有该业务标签的邮箱中发放</span>
+        </label>
+        <label class="grid gap-2">
+          <span class="text-sm font-medium">生成数量</span>
+          <input class="input input-bordered w-full" type="number" name="card_count" min="1" max="10000" step="1" value="10" required>
+        </label>
+        <label class="grid gap-2">
+          <span class="text-sm font-medium">每卡可用次数</span>
+          <input class="input input-bordered w-full" type="number" name="uses_per_card" min="1" max="100000" step="1" value="1" required>
+        </label>
+      </div>
+
+      {% if not inventory_tags | default([]) %}
+        <div class="alert alert-warning border border-warning/30 text-sm">还没有业务型库存标签。请先在“标签管理”创建例如“未使用”的业务标签，并给邮箱打上该标签。</div>
+      {% endif %}
+
+      <details class="collapse collapse-arrow border border-base-300 bg-base-100">
+        <summary class="collapse-title min-h-0 py-3 text-sm font-medium">高级设置（可选）</summary>
+        <div class="collapse-content grid gap-4 pt-2">
+          <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <label class="grid gap-2">
+              <span class="text-sm font-medium">批次名称</span>
+              <input class="input input-bordered w-full" name="name" placeholder="留空自动生成">
+            </label>
+            <label class="grid gap-2">
+              <span class="text-sm font-medium">后台分类</span>
+              <select class="select select-bordered w-full" name="category_id">
+                {% if not card_categories | default([]) %}<option value="">自动创建默认分类</option>{% endif %}
+                {% for category in card_categories | default([]) %}
+                  <option value="{{ category.id }}"{% if loop.first %} selected{% endif %}>{{ category.name }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label class="grid gap-2" data-custom-only hidden>
+              <span class="text-sm font-medium">邮箱复用范围</span>
+              <select class="select select-bordered w-full" name="source_scope">
+                <option value="all_reusable">全部可用邮箱（优先复用）</option>
+                <option value="used_reusable">仅已使用且可复用</option>
+                <option value="never_used">仅完全未使用</option>
+              </select>
+            </label>
+            <label class="grid gap-2">
+              <span class="text-sm font-medium">有效期</span>
+              <input class="input input-bordered w-full" type="datetime-local" name="expires_at">
+              <span class="text-xs text-base-content/45">留空为长期有效</span>
+            </label>
+          </div>
+
+          <fieldset class="rounded-box border border-base-300 p-4" data-address-mode-fieldset data-custom-only hidden>
+            <legend class="px-2 text-sm font-medium">定制邮箱领取方式</legend>
+            <div class="grid gap-3 sm:grid-cols-2">
+              <label class="flex cursor-pointer items-start gap-3">
+                <input class="checkbox checkbox-primary mt-0.5" type="checkbox" name="address_mode_options" value="primary" checked data-fixed-mode>
+                <span><strong class="block text-sm">固定邮箱</strong><span class="mt-1 block text-xs text-base-content/50">同平台不重复使用。</span></span>
+              </label>
+              <label class="flex cursor-pointer items-start gap-3" data-alias-option>
+                <input class="checkbox checkbox-primary mt-0.5" type="checkbox" name="address_mode_options" value="icloud_alias" data-alias-mode>
+                <span><strong class="block text-sm">iCloud 裂变邮箱</strong><span class="mt-1 block text-xs text-base-content/50">每次生成全新地址。</span></span>
+              </label>
+            </div>
+          </fieldset>
+          <input type="hidden" name="address_mode" value="primary" data-address-mode-value>
+
+          <label class="grid gap-2">
+            <span class="text-sm font-medium">排除标签（可多选）</span>
+            <select class="select select-bordered min-h-24 w-full" name="exclude_tag_ids" multiple>
+              {% for tag in tags | default([]) %}<option value="{{ tag.id }}">{{ tag.name }}</option>{% endfor %}
+            </select>
+          </label>
+        </div>
+      </details>
+
+      <div class="rounded-box border border-base-300 bg-base-200/45 p-4 text-sm" data-policy-summary></div>
+
+      <div class="flex flex-wrap gap-2">
+        <button type="submit" class="btn btn-primary"{% if not inventory_tags | default([]) %} disabled{% endif %}>生成兑换卡</button>
+        <button type="reset" class="btn btn-ghost">重置</button>
+      </div>
+    </form>
+  </div>
+</details>
+
+<section class="card border border-base-300 bg-base-100">
+  <div class="card-body gap-5">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <h2 class="card-title text-2xl">兑换卡批次</h2>
+        <p class="mt-2 text-sm text-base-content/60">可按批次筛选，批量复制或导出 UTF-8 TXT（一行一个卡密）。</p>
+      </div>
+      <form method="get" action="/admin/cards" class="flex flex-wrap gap-2">
+        <input class="input input-bordered input-sm" name="q" value="{{ search_query | default('') }}" placeholder="搜索批次 / 卡密">
+        <select class="select select-bordered select-sm" name="category_id">
+          <option value="">全部分类</option>
+          {% for category in card_categories | default([]) %}
+            <option value="{{ category.id }}" {% if current_category_id == category.id %}selected{% endif %}>{{ category.name }}</option>
+          {% endfor %}
+        </select>
+        <button class="btn btn-outline btn-sm" type="submit">筛选</button>
+      </form>
+    </div>
+
+    {% if batches | default([]) %}
+      <div class="grid min-w-0 gap-4" data-card-batches>
+        {% for batch in batches %}
+          <article class="min-w-0 rounded-box border border-base-300" data-card-batch="{{ batch.id }}">
+            <div class="flex flex-col gap-3 border-b border-base-300 bg-base-200/35 p-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div class="flex flex-wrap items-center gap-2">
+                  <h3 class="font-semibold">{{ batch.name }}</h3>
+                  <span class="badge badge-outline">{{ batch.category_name or '未分类' }}</span>
+                  <span class="badge badge-success">已创建</span>
+                </div>
+                <p class="mt-2 text-xs text-base-content/50">
+                  {{ batch.product_name or ('独立邮箱' if batch.delivery_mode | default(batch.product_type) == 'independent' else '定制邮箱') }}
+                  · 每卡 {{ batch.uses_per_card | default(batch.usage_limit) }} 次
+                  · {{ batch.created_at }}
+                </p>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <button type="button" class="btn btn-outline btn-sm" data-select-batch="{{ batch.id }}">全选本页</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-copy-batch="{{ batch.id }}">复制本页</button>
+                <a class="btn btn-ghost btn-sm" href="/admin/cards/batches/{{ batch.id }}/export.txt">导出整批 TXT</a>
+              </div>
+            </div>
+
+            <div class="max-w-full overflow-x-auto">
+              <table class="table table-sm min-w-max">
+                <thead><tr><th><span class="sr-only">选择</span></th><th>兑换卡</th><th>剩余 / 总次数</th><th>状态</th><th>最后使用</th><th>操作</th></tr></thead>
+                <tbody>
+                  {% for card in batch.cards | default([]) %}
+                    <tr data-card-row data-batch-id="{{ batch.id }}">
+                      <td><input class="checkbox checkbox-sm" type="checkbox" data-card-selector></td>
+                      <td>
+                        <code class="font-mono" data-card-code="{{ card.code | default('') }}">{{ card.masked_code or card.code }}</code>
+                      </td>
+                      <td>{{ card.remaining_uses }} / {{ card.total_uses | default(card.usage_limit) }}</td>
+                      <td><span class="badge badge-sm {% if card.status == 'active' %}badge-success{% else %}badge-ghost{% endif %}">{{ card.status_label or card.status }}</span></td>
+                      <td class="text-xs text-base-content/55">{{ card.last_used_at or '—' }}</td>
+                      <td>
+                        <div class="flex gap-1">
+                          <button type="button" class="btn btn-ghost btn-xs" data-copy-card>复制</button>
+                        </div>
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </article>
+        {% endfor %}
+      </div>
+
+      {% if page_count | default(1) > 1 %}
+        <nav class="flex flex-wrap items-center justify-between gap-3" aria-label="兑换卡分页">
+          <p class="text-sm text-base-content/60">
+            共 {{ total_filtered_cards }} 张，第 {{ current_page }} / {{ page_count }} 页
+          </p>
+          <div class="join">
+            {% if current_page > 1 %}
+              <a class="btn btn-sm join-item" href="/admin/cards?q={{ search_query | urlencode }}{% if current_category_id %}&category_id={{ current_category_id }}{% endif %}&page={{ current_page - 1 }}">上一页</a>
+            {% endif %}
+            {% if current_page < page_count %}
+              <a class="btn btn-sm join-item" href="/admin/cards?q={{ search_query | urlencode }}{% if current_category_id %}&category_id={{ current_category_id }}{% endif %}&page={{ current_page + 1 }}">下一页</a>
+            {% endif %}
+          </div>
+        </nav>
+      {% endif %}
+
+      <div class="sticky bottom-3 flex flex-col gap-3 rounded-box border border-base-300 bg-base-100/95 p-3 shadow-lg backdrop-blur sm:flex-row sm:items-center sm:justify-between" data-bulk-card-bar>
+        <span class="text-sm"><strong data-selected-count>0</strong> 张已选</span>
+        <div class="flex flex-wrap gap-2">
+          <button type="button" class="btn btn-outline btn-sm" data-copy-selected>批量复制</button>
+          <button type="button" class="btn btn-outline btn-sm" data-export-selected>批量导出 TXT</button>
+        </div>
+      </div>
+    {% else %}
+      <div class="alert border border-base-content/15">暂时没有兑换卡批次。</div>
+    {% endif %}
+  </div>
+</section>
+
+<details class="collapse collapse-arrow min-w-0 border border-base-300 bg-base-100">
+  <summary class="collapse-title text-lg font-semibold">近期邮箱接码权限</summary>
+  <div class="collapse-content min-w-0 pt-2">
+    <p class="mb-4 text-sm text-base-content/55">成功领取会保存在用户浏览器中；管理员可在这里撤销某条记录的继续接码凭证，不影响已经记账的次数与标签。</p>
+    {% if recent_claims | default([]) %}
+      <div class="max-w-full overflow-x-auto">
+        <table class="table table-sm min-w-max">
+          <thead><tr><th>领取邮箱</th><th>兑换卡</th><th>方式</th><th>状态</th><th>领取时间</th><th>权限</th></tr></thead>
+          <tbody>
+            {% for claim in recent_claims %}
+              <tr>
+                <td class="font-mono text-xs">{{ claim.recipient_email }}</td>
+                <td><code class="font-mono text-xs">{{ claim.card_code }}</code></td>
+                <td>{{ claim.address_mode_label }}</td>
+                <td><span class="badge badge-sm badge-outline">{{ claim.status_label }}</span></td>
+                <td class="text-xs text-base-content/55">{{ claim.created_at }}</td>
+                <td>
+                  {% if claim.can_revoke %}
+                    <form method="post" action="/admin/claims/{{ claim.id }}/revoke" onsubmit="return confirm('确认撤销这条邮箱记录的继续接码权限？');">
+                      <button type="submit" class="btn btn-error btn-outline btn-xs">撤销接码权限</button>
+                    </form>
+                  {% elif claim.revoked %}
+                    <span class="badge badge-ghost badge-sm">已撤销</span>
+                  {% else %}
+                    <span class="text-xs text-base-content/45">已结束</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="alert border border-base-content/15">暂时没有领取记录。</div>
+    {% endif %}
+  </div>
+</details>
+
+<script>
+  (() => {
+    const form = document.querySelector('[data-card-batch-form]');
+    const productType = form?.querySelector('[data-product-type]');
+    const serviceTag = form?.querySelector('[data-service-tag]');
+    const sourceTag = form?.querySelector('[data-source-tag]');
+    const customOnlyFields = Array.from(form?.querySelectorAll('[data-custom-only]') || []);
+    const fixedMode = form?.querySelector('[data-fixed-mode]');
+    const aliasMode = form?.querySelector('[data-alias-mode]');
+    const addressModeValue = form?.querySelector('[data-address-mode-value]');
+    const aliasOption = form?.querySelector('[data-alias-option]');
+    const policySummary = form?.querySelector('[data-policy-summary]');
+    const selectors = Array.from(document.querySelectorAll('[data-card-selector]'));
+    const selectedCount = document.querySelector('[data-selected-count]');
+
+    const copyText = async (value) => {
+      if (!value) return;
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(value);
+      else {
+        const textarea = document.createElement('textarea');
+        textarea.value = value;
+        textarea.className = 'fixed opacity-0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        textarea.remove();
+      }
+    };
+
+    const cardCodeForRow = (row) => row?.querySelector('[data-card-code]')?.dataset.cardCode || '';
+    const selectedRows = () => selectors.filter((selector) => selector.checked).map((selector) => selector.closest('[data-card-row]'));
+    const updateSelection = () => { if (selectedCount) selectedCount.textContent = String(selectedRows().length); };
+
+    const downloadCodes = (codes, filename) => {
+      if (!codes.length) { window.alert('请先选择要导出的兑换卡'); return; }
+      const blob = new Blob(['\uFEFF' + codes.join('\n') + '\n'], { type: 'text/plain;charset=utf-8' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `${filename || '兑换卡'}.txt`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(link.href);
+    };
+
+    const rowsForBatch = (batchId) => Array.from(document.querySelectorAll(`[data-card-row][data-batch-id="${CSS.escape(String(batchId))}"]`));
+
+    selectors.forEach((selector) => selector.addEventListener('change', updateSelection));
+    document.querySelectorAll('[data-copy-card]').forEach((button) => button.addEventListener('click', () => copyText(cardCodeForRow(button.closest('[data-card-row]')))));
+    document.querySelectorAll('[data-select-batch]').forEach((button) => button.addEventListener('click', () => {
+      const rows = rowsForBatch(button.dataset.selectBatch);
+      const shouldSelect = rows.some((row) => !row.querySelector('[data-card-selector]').checked);
+      rows.forEach((row) => { row.querySelector('[data-card-selector]').checked = shouldSelect; });
+      updateSelection();
+    }));
+    document.querySelectorAll('[data-copy-batch]').forEach((button) => button.addEventListener('click', () => copyText(rowsForBatch(button.dataset.copyBatch).map(cardCodeForRow).filter(Boolean).join('\n'))));
+    document.querySelectorAll('[data-export-batch]').forEach((button) => button.addEventListener('click', () => downloadCodes(rowsForBatch(button.dataset.exportBatch).map(cardCodeForRow).filter(Boolean), button.dataset.batchName)));
+    document.querySelector('[data-copy-selected]')?.addEventListener('click', () => {
+      const codes = selectedRows().map(cardCodeForRow).filter(Boolean);
+      if (!codes.length) { window.alert('请先选择要复制的兑换卡'); return; }
+      copyText(codes.join('\n'));
+    });
+    document.querySelector('[data-export-selected]')?.addEventListener('click', () => downloadCodes(selectedRows().map(cardCodeForRow).filter(Boolean), '选中兑换卡'));
+
+    const syncProductPolicy = () => {
+      if (!productType) return;
+      const independent = productType.value === 'independent';
+      aliasOption?.classList.toggle('opacity-45', independent);
+      if (aliasMode) { aliasMode.disabled = independent; if (independent) aliasMode.checked = false; }
+      if (fixedMode) {
+        if (independent || (!fixedMode.checked && !aliasMode?.checked)) fixedMode.checked = true;
+        fixedMode.disabled = independent;
+      }
+      if (addressModeValue) {
+        addressModeValue.value = fixedMode?.checked && aliasMode?.checked
+          ? 'choice'
+          : (aliasMode?.checked ? 'icloud_alias' : 'primary');
+      }
+      customOnlyFields.forEach((element) => { element.hidden = independent; });
+      if (serviceTag) {
+        serviceTag.required = !independent;
+        serviceTag.disabled = independent;
+      }
+      const selectedSource = sourceTag?.selectedOptions?.[0];
+      const sourceLabel = selectedSource?.value ? selectedSource.textContent.trim() : '尚未选择库存标签';
+      if (policySummary) policySummary.textContent = independent
+        ? `独立邮箱 · ${sourceLabel} · 固定发放完全未使用的主邮箱，成功接码后退出共享池。`
+        : `定制邮箱 · ${sourceLabel} · 按平台记录使用历史，可在高级设置中开启 iCloud 裂变。`;
+    };
+    productType?.addEventListener('change', syncProductPolicy);
+    fixedMode?.addEventListener('change', syncProductPolicy);
+    aliasMode?.addEventListener('change', syncProductPolicy);
+    sourceTag?.addEventListener('change', syncProductPolicy);
+    form?.addEventListener('reset', () => window.setTimeout(syncProductPolicy));
+    form?.addEventListener('submit', (event) => {
+      if (productType?.value !== 'independent' && !fixedMode?.checked && !aliasMode?.checked) {
+        event.preventDefault();
+        window.alert('请至少选择一种领取方式');
+      }
+    });
+    syncProductPolicy();
+
+  })();
+</script>
+{% endblock %}

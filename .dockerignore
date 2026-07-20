@@ -3,7 +3,12 @@ __pycache__
 .git
 .venv
 .env
+.builder
+.playwright-cli
+.serena
 data
+output
+tests
 *.pyc
 *.pyo
 *.pyd

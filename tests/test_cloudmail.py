@@ -1,6 +1,7 @@
 import httpx
+import pytest
 
-from app.cloudmail import CloudMailClient
+from app.cloudmail import CloudMailClient, CloudMailError
 
 
 def test_cloudmail_client_generates_token_and_queries_recent_emails() -> None:
@@ -140,3 +141,35 @@ def test_cloudmail_client_uses_internal_login_and_all_email_list_for_precise_rec
     assert emails[0].subject == "Your ChatGPT code is 330119"
     assert emails[0].to_email == "openai@eve.ink"
     assert emails[0].recipient == '[{"address":"cranes_solute.1o@icloud.com","name":"buyer"}]'
+
+
+@pytest.mark.parametrize(
+    ("response", "message"),
+    [
+        (httpx.Response(503, text="unavailable"), "CloudMail HTTP 请求失败：503"),
+        (httpx.Response(200, text="not-json"), "CloudMail 返回了无效的 JSON"),
+    ],
+)
+def test_cloudmail_client_wraps_http_and_json_failures(response: httpx.Response, message: str) -> None:
+    client = CloudMailClient(
+        base_url="https://mail.example.com",
+        api_token="fixed-token",
+        transport=httpx.MockTransport(lambda _request: response),
+    )
+
+    with pytest.raises(CloudMailError, match=message):
+        client.fetch_recent_emails("buyer@example.com")
+
+
+def test_cloudmail_client_wraps_network_failures() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    client = CloudMailClient(
+        base_url="https://mail.example.com",
+        api_token="fixed-token",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(CloudMailError, match="CloudMail 网络请求失败"):
+        client.fetch_recent_emails("buyer@example.com")

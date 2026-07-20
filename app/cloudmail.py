@@ -109,11 +109,21 @@ class CloudMailClient:
         return token
 
     def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
-        with httpx.Client(base_url=self.base_url, transport=self.transport, timeout=self.timeout) as client:
-            response = client.request(method, path, **kwargs)
+        try:
+            with httpx.Client(base_url=self.base_url, transport=self.transport, timeout=self.timeout) as client:
+                response = client.request(method, path, **kwargs)
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise CloudMailError(f"CloudMail HTTP 请求失败：{exc.response.status_code}") from exc
+        except httpx.RequestError as exc:
+            raise CloudMailError(f"CloudMail 网络请求失败：{exc}") from exc
 
-        response.raise_for_status()
-        payload = response.json()
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise CloudMailError("CloudMail 返回了无效的 JSON") from exc
+        if not isinstance(payload, dict):
+            raise CloudMailError("CloudMail 返回格式无效")
         if payload.get("code") != 200:
             raise CloudMailError(payload.get("message") or "CloudMail request failed")
         return payload

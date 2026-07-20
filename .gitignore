@@ -3,6 +3,10 @@ __pycache__/
 .env
 .venv/
 .hermes/
+.builder/
+.playwright-cli/
+.serena/
+output/
 data/
 *.egg-info/
 *.pyc

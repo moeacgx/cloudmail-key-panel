@@ -1,0 +1,691 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="mx-auto grid w-full max-w-5xl gap-5" data-public-workbench data-poll-interval="{{ public_poll_interval_ms | default(5000) }}" data-recent-limit="{{ settings.public_recent_mailbox_limit | default(20) }}">
+  <section class="card overflow-hidden border border-base-300 bg-base-100 shadow-sm">
+    <div class="card-body gap-5 p-5 sm:p-7">
+      <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div class="max-w-2xl">
+          <div class="mb-2 flex flex-wrap items-center gap-2">
+            <span class="badge badge-primary badge-outline">兑换卡注册台</span>
+            <span class="badge badge-ghost" data-product-badge hidden></span>
+          </div>
+          <h2 class="text-2xl font-semibold tracking-tight sm:text-3xl">兑换后即可领取邮箱</h2>
+          <p class="mt-2 text-sm leading-6 text-base-content/60">
+            输入兑换卡，按卡片配置领取独立邮箱或定制邮箱。浏览器只保存近期入口，领取与扣次状态由服务器记录。
+          </p>
+        </div>
+        <a class="btn btn-ghost btn-sm" href="/key-lookup">已有查看 Key</a>
+      </div>
+
+      <form class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]" data-redeem-form novalidate>
+        <label class="grid gap-2">
+          <span class="text-sm font-medium">兑换卡</span>
+          <input
+            class="input input-bordered w-full font-mono tracking-wide"
+            type="text"
+            name="card_code"
+            autocomplete="off"
+            autocapitalize="characters"
+            spellcheck="false"
+            placeholder="请输入兑换卡"
+            data-card-code
+            required
+          >
+        </label>
+        <button class="btn btn-primary sm:self-end" type="submit" data-redeem-button>验证兑换卡</button>
+      </form>
+
+      {% if error %}<div class="alert alert-error border border-error/30 text-sm">{{ error }}</div>{% endif %}
+
+      <div class="alert border border-base-content/15 bg-base-200/60 text-sm" role="status" data-public-message>
+        输入兑换卡后开始使用。
+      </div>
+    </div>
+  </section>
+
+  <section class="card border border-base-300 bg-base-100 shadow-sm" data-session-panel hidden>
+    <div class="card-body gap-5 p-5 sm:p-7">
+      <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 class="text-xl font-semibold" data-product-title>定制邮箱</h2>
+          <p class="mt-1 text-sm text-base-content/60" data-product-description>兑换卡已经验证，可以开始领取。</p>
+        </div>
+        <div class="stats border border-base-300 bg-base-100 shadow-none">
+          <div class="stat px-4 py-2">
+            <div class="stat-title text-xs">剩余次数</div>
+            <div class="stat-value text-2xl" data-remaining-uses>0</div>
+          </div>
+          <div class="stat px-4 py-2">
+            <div class="stat-title text-xs">有效期</div>
+            <div class="stat-value text-sm" data-expires-at>长期有效</div>
+          </div>
+        </div>
+      </div>
+
+      <fieldset class="grid gap-3" data-mode-fieldset hidden>
+        <legend class="mb-2 text-sm font-medium">选择领取方式</legend>
+        <div class="grid gap-3 sm:grid-cols-2" data-mode-options></div>
+      </fieldset>
+
+      <div class="rounded-box border border-warning/40 bg-warning/10 px-4 py-3 text-sm" data-cooldown-panel hidden>
+        <div class="flex items-center gap-2 font-medium">
+          <i data-lucide="timer-reset" class="size-4" aria-hidden="true"></i>
+          暂时无法领取新邮箱
+        </div>
+        <p class="mt-1 text-base-content/65">连续跳过 3 次后需要等待，剩余 <strong data-cooldown-countdown>--:--</strong>。近期邮箱仍可正常接码。</p>
+      </div>
+
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="btn btn-primary" data-claim-button>生成邮箱</button>
+        <button type="button" class="btn btn-ghost" data-change-card>更换兑换卡</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="card border border-primary/35 bg-base-100 shadow-sm" data-current-claim-panel hidden>
+    <div class="card-body gap-5 p-5 sm:p-7">
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-xl font-semibold">当前邮箱</h2>
+            <span class="badge badge-warning" data-current-status>等待验证码</span>
+            <span class="badge badge-outline" data-current-kind></span>
+          </div>
+          <p class="mt-2 text-sm text-base-content/60" data-current-service></p>
+        </div>
+        <span class="text-xs text-base-content/45" data-current-created-at></span>
+      </div>
+
+      <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(13rem,0.55fr)]">
+        <div class="rounded-box border border-base-300 bg-base-200/45 p-4">
+          <span class="text-xs font-medium text-base-content/50">注册邮箱</span>
+          <div class="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <strong class="break-all font-mono text-base sm:text-lg" data-current-email></strong>
+            <button type="button" class="btn btn-outline btn-sm shrink-0" data-copy-current-email>
+              <i data-lucide="copy" class="size-4" aria-hidden="true"></i>
+              复制邮箱
+            </button>
+          </div>
+          <p class="mt-2 text-xs text-base-content/45" data-current-parent-wrap hidden>
+            所属主邮箱：<span class="font-mono" data-current-parent></span>
+          </p>
+        </div>
+
+        <div class="rounded-box border border-base-300 bg-base-200/45 p-4">
+          <span class="text-xs font-medium text-base-content/50">最新验证码</span>
+          <button
+            type="button"
+            class="mt-2 flex min-h-10 w-full items-center justify-center rounded-field border border-error/35 bg-base-100 px-3 font-mono text-lg font-bold tracking-[0.18em] text-error"
+            data-current-code
+            disabled
+          >等待中…</button>
+          <p class="mt-2 text-center text-xs text-base-content/45" data-current-code-time>正在自动查询</p>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="btn btn-outline" data-refresh-current>
+          <i data-lucide="refresh-cw" class="size-4" aria-hidden="true"></i>
+          刷新验证码
+        </button>
+        <button type="button" class="btn btn-ghost" data-skip-current>跳过当前邮箱</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="card border border-base-300 bg-base-100 shadow-sm">
+    <div class="card-body gap-4 p-5 sm:p-7">
+      <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 class="text-xl font-semibold">近期邮箱</h2>
+          <p class="mt-1 text-sm text-base-content/60">当前浏览器保存近期入口，可持续查询主邮箱及附属裂变邮箱。</p>
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm" data-clear-recent>清除本地记录</button>
+      </div>
+      <div class="alert border border-base-content/15 bg-base-200/55 text-sm" data-recent-empty>当前浏览器还没有近期邮箱。</div>
+      <div class="grid gap-3" data-recent-list></div>
+    </div>
+  </section>
+</div>
+
+<div class="pointer-events-none fixed inset-x-0 bottom-6 z-50 flex justify-center px-4" aria-live="polite" aria-atomic="true">
+  <div class="translate-y-2 rounded-full bg-base-content/90 px-4 py-2 text-sm text-base-100 opacity-0 shadow-lg transition" data-public-toast aria-hidden="true"></div>
+</div>
+
+<template data-mode-template>
+  <label class="flex cursor-pointer gap-3 rounded-box border border-base-300 p-4 transition hover:border-primary/50 has-[:checked]:border-primary has-[:checked]:bg-primary/5">
+    <input class="radio radio-primary mt-0.5" type="radio" name="address_mode">
+    <span class="min-w-0">
+      <strong class="block" data-mode-label></strong>
+      <span class="mt-1 block text-xs leading-5 text-base-content/55" data-mode-description></span>
+    </span>
+  </label>
+</template>
+
+<template data-recent-group-template>
+  <article class="rounded-box border border-base-300 bg-base-100 p-4" data-recent-group>
+    <div class="flex flex-col gap-2 border-b border-base-300 pb-3 sm:flex-row sm:items-center sm:justify-between">
+      <div class="min-w-0">
+        <span class="text-xs text-base-content/45">邮箱记录</span>
+        <h3 class="mt-1 break-all font-mono font-semibold" data-group-title></h3>
+      </div>
+      <span class="badge badge-outline" data-group-count></span>
+    </div>
+    <div class="mt-3 grid gap-2" data-group-items></div>
+  </article>
+</template>
+
+<template data-recent-item-template>
+  <div class="grid gap-3 rounded-box bg-base-200/55 p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center" data-recent-item>
+    <div class="min-w-0">
+      <div class="flex flex-wrap items-center gap-2">
+        <strong class="break-all font-mono text-sm" data-recent-email></strong>
+        <span class="badge badge-ghost badge-sm" data-recent-kind></span>
+        <span class="badge badge-outline badge-sm" data-recent-service></span>
+      </div>
+      <p class="mt-1 text-xs text-base-content/45" data-recent-time></p>
+    </div>
+    <div class="flex flex-wrap items-center gap-2 sm:justify-end">
+      <button type="button" class="btn btn-ghost btn-sm font-mono font-semibold text-error" data-recent-code disabled>等待中…</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-copy-recent>复制</button>
+      <button type="button" class="btn btn-outline btn-sm" data-refresh-recent>接码</button>
+    </div>
+  </div>
+</template>
+
+<script>
+  (() => {
+    const root = document.querySelector('[data-public-workbench]');
+    if (!root) return;
+
+    const RECENT_STORAGE_KEY = 'cloudmail-recent-claims-v1';
+    const pollInterval = Math.max(Number(root.dataset.pollInterval) || 5000, 2000);
+    const recentLimit = Math.max(Number(root.dataset.recentLimit) || 20, 1);
+    const sessionPanel = root.querySelector('[data-session-panel]');
+    const currentPanel = root.querySelector('[data-current-claim-panel]');
+    const messageBox = root.querySelector('[data-public-message]');
+    const redeemForm = root.querySelector('[data-redeem-form]');
+    const redeemButton = root.querySelector('[data-redeem-button]');
+    const cardInput = root.querySelector('[data-card-code]');
+    const claimButton = root.querySelector('[data-claim-button]');
+    const modeFieldset = root.querySelector('[data-mode-fieldset]');
+    const modeOptions = root.querySelector('[data-mode-options]');
+    const modeTemplate = document.querySelector('[data-mode-template]');
+    const cooldownPanel = root.querySelector('[data-cooldown-panel]');
+    const cooldownCountdown = root.querySelector('[data-cooldown-countdown]');
+    const recentList = root.querySelector('[data-recent-list]');
+    const recentEmpty = root.querySelector('[data-recent-empty]');
+    const groupTemplate = document.querySelector('[data-recent-group-template]');
+    const itemTemplate = document.querySelector('[data-recent-item-template]');
+    const toast = document.querySelector('[data-public-toast]');
+
+    let session = null;
+    let currentClaim = null;
+    let currentPoller = null;
+    let currentRefreshSequence = 0;
+    let cooldownTimer = null;
+    let toastTimer = null;
+
+    const modeMeta = {
+      primary: {
+        label: '定制邮箱',
+        description: '领取一个固定邮箱，适用于本兑换卡指定的平台。',
+      },
+      icloud_alias: {
+        label: '临时定制邮箱',
+        description: '生成全新的 iCloud 裂变地址，已生成的地址仍可持续接码。',
+      },
+      independent: {
+        label: '独立邮箱',
+        description: '为更注重隐私的场景提供，不会再用于其他领取。',
+      },
+    };
+
+    const normalizedClaim = (value, defaultDeliveryMode = '') => {
+      if (!value || typeof value !== 'object') return null;
+      const id = value.id ?? value.claim_id;
+      const recipientEmail = value.recipient_email || value.email || value.registration_email || '';
+      if (!id || !recipientEmail) return null;
+      return {
+        id,
+        recipient_email: recipientEmail,
+        parent_email: value.parent_email || value.root_email || value.main_email || '',
+        address_mode: value.address_mode || value.address_kind || (value.parent_email ? 'icloud_alias' : 'primary'),
+        delivery_mode: value.delivery_mode || value.product_type || defaultDeliveryMode,
+        service_label: value.service_label || value.platform || value.target_site || '',
+        status: value.status || 'waiting',
+        view_token: value.view_token || value.claim_token || value.access_key || '',
+        created_at: value.created_at || '',
+        latest_code: value.latest_code || '',
+        latest_code_at: value.latest_code_at || '',
+        live_polling: value.live_polling !== false,
+        superseded_at: value.superseded_at || '',
+      };
+    };
+
+    const setMessage = (message, kind = '') => {
+      messageBox.textContent = message || '';
+      messageBox.className = 'alert text-sm border';
+      if (kind === 'error') messageBox.classList.add('alert-error', 'border-error/30');
+      else if (kind === 'success') messageBox.classList.add('alert-success', 'border-success/30');
+      else messageBox.classList.add('border-base-content/15', 'bg-base-200/60');
+    };
+
+    const showToast = (message) => {
+      if (!toast) return;
+      if (toastTimer) window.clearTimeout(toastTimer);
+      toast.textContent = message;
+      toast.setAttribute('aria-hidden', 'false');
+      toast.classList.remove('translate-y-2', 'opacity-0');
+      toast.classList.add('translate-y-0', 'opacity-100');
+      toastTimer = window.setTimeout(() => {
+        toast.classList.remove('translate-y-0', 'opacity-100');
+        toast.classList.add('translate-y-2', 'opacity-0');
+        toast.setAttribute('aria-hidden', 'true');
+      }, 1600);
+    };
+
+    const requestJson = async (url, options = {}) => {
+      const { headers = {}, ...requestOptions } = options;
+      const response = await fetch(url, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+        ...requestOptions,
+        headers: { 'X-Requested-With': 'public-workbench', ...headers },
+      });
+      let payload = {};
+      try { payload = await response.json(); } catch (_) { /* 由统一错误处理接管 */ }
+      if (!response.ok) {
+        const error = new Error(payload.message || payload.error?.message || payload.error || '请求失败');
+        error.payload = payload;
+        error.status = response.status;
+        throw error;
+      }
+      return payload;
+    };
+
+    const copyText = async (value) => {
+      if (!value) return;
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(value);
+      else {
+        const fallback = document.createElement('textarea');
+        fallback.value = value;
+        fallback.className = 'fixed left-0 top-0 opacity-0';
+        fallback.setAttribute('readonly', 'readonly');
+        document.body.appendChild(fallback);
+        fallback.select();
+        document.execCommand('copy');
+        fallback.remove();
+      }
+      showToast('已复制');
+    };
+
+    const getRecentClaims = () => {
+      try {
+        const parsed = JSON.parse(window.localStorage.getItem(RECENT_STORAGE_KEY) || '[]');
+        return Array.isArray(parsed) ? parsed.map(normalizedClaim).filter(Boolean).slice(0, recentLimit) : [];
+      } catch (_) {
+        return [];
+      }
+    };
+
+    const saveRecentClaims = (claims) => {
+      try {
+        window.localStorage.setItem(RECENT_STORAGE_KEY, JSON.stringify(claims.slice(0, recentLimit)));
+      } catch (_) {
+        // 隐私模式、存储禁用或配额不足时不影响服务端领取和验证码轮询。
+      }
+    };
+
+    const rememberClaim = (claim) => {
+      const normalized = normalizedClaim(claim);
+      if (!normalized) return;
+      const claims = getRecentClaims().filter((item) => String(item.id) !== String(normalized.id));
+      claims.unshift(normalized);
+      saveRecentClaims(claims);
+      renderRecent();
+    };
+
+    const formatTime = (value) => {
+      if (!value) return '';
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString('zh-CN', { hour12: false });
+    };
+
+    const normalizeAddressMode = (mode) => mode === 'fixed' ? 'primary' : (mode === 'alias' || mode === 'icloud_plus' ? 'icloud_alias' : mode);
+    const kindLabel = (mode, deliveryMode = '') => {
+      const normalizedMode = normalizeAddressMode(mode);
+      if (deliveryMode === 'independent' && normalizedMode === 'primary') return modeMeta.independent.label;
+      return modeMeta[normalizedMode]?.label || '定制邮箱';
+    };
+
+    const readModes = (payload) => {
+      const rawModes = payload?.address_modes || payload?.allowed_address_modes || payload?.card?.address_modes || [];
+      if (Array.isArray(rawModes) && rawModes.length) return rawModes.map((item) => normalizeAddressMode(typeof item === 'string' ? item : item.value)).filter(Boolean);
+      const configuredMode = payload?.address_mode || payload?.card?.address_mode;
+      if (configuredMode === 'choice') return ['primary', 'icloud_alias'];
+      if (configuredMode) return [normalizeAddressMode(configuredMode)];
+      return ['primary'];
+    };
+
+    const renderModes = (modes) => {
+      modeOptions.innerHTML = '';
+      modes.forEach((mode, index) => {
+        const fragment = modeTemplate.content.cloneNode(true);
+        const input = fragment.querySelector('input');
+        const independent = (session?.delivery_mode || session?.product_type) === 'independent';
+        const meta = independent && mode === 'primary'
+          ? modeMeta.independent
+          : (modeMeta[mode] || modeMeta[mode === 'icloud_plus' || mode === 'alias' ? 'icloud_alias' : 'primary']);
+        input.value = mode;
+        input.checked = index === 0;
+        fragment.querySelector('[data-mode-label]').textContent = meta.label;
+        fragment.querySelector('[data-mode-description]').textContent = meta.description;
+        modeOptions.appendChild(fragment);
+      });
+      modeFieldset.hidden = modes.length <= 1;
+    };
+
+    const stopCurrentPolling = () => {
+      if (currentPoller) window.clearInterval(currentPoller);
+      currentPoller = null;
+    };
+
+    const renderCurrentClaim = (claim) => {
+      currentRefreshSequence += 1;
+      currentClaim = normalizedClaim(claim, session?.delivery_mode || session?.product_type || '');
+      currentPanel.hidden = !currentClaim;
+      stopCurrentPolling();
+      if (!currentClaim) return;
+
+      root.querySelector('[data-current-email]').textContent = currentClaim.recipient_email;
+      root.querySelector('[data-current-kind]').textContent = kindLabel(currentClaim.address_mode, currentClaim.delivery_mode || session?.delivery_mode);
+      root.querySelector('[data-current-service]').textContent = currentClaim.service_label ? `适用于 ${currentClaim.service_label}` : '';
+      root.querySelector('[data-current-created-at]').textContent = formatTime(currentClaim.created_at);
+      const parentWrap = root.querySelector('[data-current-parent-wrap]');
+      parentWrap.hidden = !currentClaim.parent_email || currentClaim.parent_email === currentClaim.recipient_email;
+      root.querySelector('[data-current-parent]').textContent = currentClaim.parent_email;
+      renderCurrentCode(currentClaim.latest_code, currentClaim.latest_code_at);
+      rememberClaim(currentClaim);
+      if (currentClaim.live_polling) currentPoller = window.setInterval(refreshCurrentCode, pollInterval);
+    };
+
+    const renderCurrentCode = (code, receivedAt = '') => {
+      const button = root.querySelector('[data-current-code]');
+      const normalizedCode = String(code || '').trim();
+      button.textContent = normalizedCode || '等待中…';
+      button.dataset.code = normalizedCode;
+      button.disabled = !normalizedCode;
+      root.querySelector('[data-current-code-time]').textContent = normalizedCode
+        ? `更新于 ${formatTime(receivedAt) || '刚刚'}，点击验证码可复制`
+        : '正在自动查询';
+      root.querySelector('[data-current-status]').textContent = normalizedCode ? '已收到验证码' : '等待验证码';
+      root.querySelector('[data-current-status]').className = `badge ${normalizedCode ? 'badge-success' : 'badge-warning'}`;
+    };
+
+    const updateSessionStats = (payload) => {
+      const card = payload?.card || payload || {};
+      const remaining = card.remaining_uses ?? card.remaining_count ?? payload?.remaining_uses ?? 0;
+      root.querySelector('[data-remaining-uses]').textContent = String(remaining);
+      root.querySelector('[data-expires-at]').textContent = formatTime(card.expires_at) || '长期有效';
+    };
+
+    const setCooldown = (untilValue) => {
+      if (cooldownTimer) window.clearInterval(cooldownTimer);
+      cooldownTimer = null;
+      const until = untilValue ? new Date(untilValue) : null;
+      const tick = () => {
+        const seconds = until && !Number.isNaN(until.getTime()) ? Math.max(0, Math.ceil((until.getTime() - Date.now()) / 1000)) : 0;
+        cooldownPanel.hidden = seconds <= 0;
+        claimButton.disabled = seconds > 0 || !session;
+        cooldownCountdown.textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+        if (seconds <= 0 && cooldownTimer) {
+          window.clearInterval(cooldownTimer);
+          cooldownTimer = null;
+        }
+      };
+      tick();
+      if (!cooldownPanel.hidden) cooldownTimer = window.setInterval(tick, 1000);
+    };
+
+    const renderSession = (payload) => {
+      session = payload?.valid === false ? null : (payload?.card || payload?.session || payload);
+      sessionPanel.hidden = !session;
+      if (!session) {
+        renderCurrentClaim(null);
+        return;
+      }
+      const productName = session.product_name || session.service_label || session.platform || ((session.delivery_mode || session.product_type) === 'independent' ? '独立邮箱' : '定制邮箱');
+      root.querySelector('[data-product-title]').textContent = productName;
+      root.querySelector('[data-product-description]').textContent = session.description || (session.platform ? `适用于 ${session.platform}` : '兑换卡已验证，可以开始领取。');
+      root.querySelector('[data-product-badge]').textContent = productName;
+      root.querySelector('[data-product-badge]').hidden = false;
+      updateSessionStats(payload);
+      renderModes(readModes(payload));
+      setCooldown(session.cooldown_until || payload?.cooldown_until);
+      renderCurrentClaim(payload?.active_claim || session.active_claim || null);
+    };
+
+    async function refreshCurrentCode() {
+      if (!currentClaim) return;
+      const claimId = currentClaim.id;
+      const refreshSequence = ++currentRefreshSequence;
+      try {
+        const payload = await requestJson(`/api/public/claims/${encodeURIComponent(claimId)}/code`, {
+          headers: currentClaim.view_token ? { 'X-Claim-Token': currentClaim.view_token } : {},
+        });
+        if (
+          refreshSequence !== currentRefreshSequence
+          || !currentClaim
+          || String(currentClaim.id) !== String(claimId)
+        ) return;
+        const refreshed = normalizedClaim({ ...currentClaim, ...(payload.claim || {}), ...payload });
+        currentClaim = refreshed;
+        renderCurrentCode(refreshed.latest_code, refreshed.latest_code_at);
+        rememberClaim(refreshed);
+        if (!refreshed.live_polling) {
+          stopCurrentPolling();
+          setMessage(payload.message || '该邮箱已转为历史记录。');
+        }
+        if (payload.remaining_uses !== undefined) root.querySelector('[data-remaining-uses]').textContent = String(payload.remaining_uses);
+      } catch (error) {
+        if (refreshSequence !== currentRefreshSequence) return;
+        if (error.status === 404 || error.status === 410) {
+          stopCurrentPolling();
+          setMessage(error.message, 'error');
+        }
+      }
+    }
+
+    const refreshRecentClaim = async (claim, elements) => {
+      elements.refresh.disabled = true;
+      elements.refresh.textContent = '查询中…';
+      try {
+        const payload = await requestJson(`/api/public/claims/${encodeURIComponent(claim.id)}/code`, {
+          headers: claim.view_token ? { 'X-Claim-Token': claim.view_token } : {},
+        });
+        const refreshed = normalizedClaim({ ...claim, ...(payload.claim || {}), ...payload });
+        elements.code.textContent = refreshed.latest_code || '等待中…';
+        elements.code.disabled = !refreshed.latest_code;
+        elements.code.dataset.code = refreshed.latest_code;
+        const claims = getRecentClaims().map((item) => String(item.id) === String(refreshed.id) ? refreshed : item);
+        saveRecentClaims(claims);
+        if (!refreshed.live_polling) {
+          elements.refresh.disabled = true;
+          elements.refresh.textContent = '历史记录';
+        }
+      } catch (error) {
+        showToast(error.message || '查询失败');
+      } finally {
+        if (elements.refresh.textContent !== '历史记录') {
+          elements.refresh.disabled = false;
+          elements.refresh.textContent = '接码';
+        }
+      }
+    };
+
+    const renderRecent = () => {
+      const claims = getRecentClaims();
+      recentList.innerHTML = '';
+      recentEmpty.hidden = claims.length > 0;
+      const groups = new Map();
+      claims.forEach((claim) => {
+        const key = claim.parent_email || claim.recipient_email;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(claim);
+      });
+
+      groups.forEach((items, parentEmail) => {
+        const fragment = groupTemplate.content.cloneNode(true);
+        fragment.querySelector('[data-group-title]').textContent = parentEmail;
+        fragment.querySelector('[data-group-count]').textContent = `${items.length} 个地址`;
+        const itemContainer = fragment.querySelector('[data-group-items]');
+        items.forEach((claim) => {
+          const itemFragment = itemTemplate.content.cloneNode(true);
+          itemFragment.querySelector('[data-recent-email]').textContent = claim.recipient_email;
+          itemFragment.querySelector('[data-recent-kind]').textContent = kindLabel(claim.address_mode, claim.delivery_mode);
+          const serviceBadge = itemFragment.querySelector('[data-recent-service]');
+          serviceBadge.textContent = claim.service_label;
+          serviceBadge.hidden = !claim.service_label;
+          itemFragment.querySelector('[data-recent-time]').textContent = formatTime(claim.created_at) || '时间未记录';
+          const elements = {
+            code: itemFragment.querySelector('[data-recent-code]'),
+            refresh: itemFragment.querySelector('[data-refresh-recent]'),
+          };
+          elements.code.textContent = claim.latest_code || '等待中…';
+          elements.code.disabled = !claim.latest_code;
+          elements.code.dataset.code = claim.latest_code;
+          if (!claim.live_polling) {
+            elements.refresh.disabled = true;
+            elements.refresh.textContent = '历史记录';
+          }
+          elements.code.addEventListener('click', () => copyText(elements.code.dataset.code));
+          itemFragment.querySelector('[data-copy-recent]').addEventListener('click', () => copyText(claim.recipient_email));
+          elements.refresh.addEventListener('click', () => refreshRecentClaim(claim, elements));
+          itemContainer.appendChild(itemFragment);
+        });
+        recentList.appendChild(fragment);
+      });
+      window.lucide?.createIcons({ attrs: { 'stroke-width': 1.8 } });
+    };
+
+    redeemForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const cardCode = cardInput.value.trim();
+      if (!cardCode) {
+        setMessage('请输入兑换卡。', 'error');
+        cardInput.focus();
+        return;
+      }
+      redeemButton.disabled = true;
+      redeemButton.textContent = '验证中…';
+      try {
+        const payload = await requestJson('/api/public/redeem', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ card_code: cardCode }),
+        });
+        cardInput.value = '';
+        renderSession(payload);
+        setMessage(payload.message || '兑换卡验证成功。', 'success');
+      } catch (error) {
+        renderSession({ valid: false });
+        setMessage(error.message, 'error');
+      } finally {
+        redeemButton.disabled = false;
+        redeemButton.textContent = '验证兑换卡';
+      }
+    });
+
+    claimButton.addEventListener('click', async () => {
+      if (!session || claimButton.disabled) return;
+      const selectedMode = modeOptions.querySelector('input[name="address_mode"]:checked')?.value || readModes(session)[0] || 'primary';
+      claimButton.disabled = true;
+      claimButton.textContent = '生成中…';
+      try {
+        const payload = await requestJson('/api/public/claims', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Idempotency-Key': window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}` },
+          body: JSON.stringify({ address_mode: selectedMode }),
+        });
+        renderCurrentClaim(payload.claim || payload.mapping || payload);
+        updateSessionStats(payload);
+        setMessage(payload.message || '邮箱已生成，正在等待验证码。', 'success');
+      } catch (error) {
+        setCooldown(error.payload?.cooldown_until);
+        setMessage(error.message, 'error');
+      } finally {
+        if (cooldownPanel.hidden) claimButton.disabled = false;
+        claimButton.textContent = '生成邮箱';
+      }
+    });
+
+    root.querySelector('[data-skip-current]').addEventListener('click', async () => {
+      if (!currentClaim) return;
+      const skippedId = currentClaim.id;
+      root.querySelector('[data-skip-current]').disabled = true;
+      try {
+        const payload = await requestJson(`/api/public/claims/${encodeURIComponent(skippedId)}/skip`, {
+          method: 'POST',
+          headers: currentClaim.view_token ? { 'X-Claim-Token': currentClaim.view_token } : {},
+        });
+        const returnedClaim = normalizedClaim(payload.claim);
+        if (returnedClaim?.latest_code) {
+          rememberClaim(returnedClaim);
+        } else {
+          const claims = getRecentClaims().filter((item) => String(item.id) !== String(skippedId) || item.latest_code);
+          saveRecentClaims(claims);
+          renderRecent();
+        }
+        renderCurrentClaim(null);
+        updateSessionStats(payload);
+        setCooldown(payload.cooldown_until);
+        setMessage(payload.message || '已跳过当前邮箱。');
+      } catch (error) {
+        setMessage(error.message, 'error');
+      } finally {
+        root.querySelector('[data-skip-current]').disabled = false;
+      }
+    });
+
+    root.querySelector('[data-refresh-current]').addEventListener('click', refreshCurrentCode);
+    root.querySelector('[data-copy-current-email]').addEventListener('click', () => copyText(currentClaim?.recipient_email));
+    root.querySelector('[data-current-code]').addEventListener('click', (event) => copyText(event.currentTarget.dataset.code));
+    root.querySelector('[data-change-card]').addEventListener('click', async () => {
+      try { await requestJson('/api/public/session', { method: 'DELETE' }); } catch (_) { /* 本地仍可退出 */ }
+      session = null;
+      sessionPanel.hidden = true;
+      renderCurrentClaim(null);
+      root.querySelector('[data-product-badge]').hidden = true;
+      cardInput.focus();
+      setMessage('已退出当前兑换卡，请输入新的兑换卡。');
+    });
+    root.querySelector('[data-clear-recent]').addEventListener('click', () => {
+      if (!getRecentClaims().length || window.confirm('只清除当前浏览器的近期记录，不会删除服务端邮箱。确定继续？')) {
+        try {
+          window.localStorage.removeItem(RECENT_STORAGE_KEY);
+        } catch (_) {
+          // 本地存储不可用时无需阻断页面交互。
+        }
+        renderRecent();
+      }
+    });
+
+    const restoreSession = async () => {
+      try {
+        const payload = await requestJson('/api/public/session');
+        if (payload?.valid !== false && (payload?.card || payload?.session || payload?.remaining_uses !== undefined)) {
+          renderSession(payload);
+          setMessage(payload.message || '已恢复上次的兑换卡会话。');
+        }
+      } catch (_) {
+        // 没有会话是首次访问的正常状态。
+      }
+    };
+
+    renderRecent();
+    restoreSession();
+  })();
+</script>
+{% endblock %}
