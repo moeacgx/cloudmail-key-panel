@@ -35,6 +35,7 @@ from app.verification_extractor import (
     OpenAICompatibleCodeExtractor,
     VerificationCodeExtractor,
     VerificationExtractionError,
+    validate_openai_base_url,
 )
 
 _TAG_PATTERN = re.compile(r"<[^>]+>")
@@ -1032,6 +1033,59 @@ def create_app(
             search_query=q,
             category_filter=category,
             page=page,
+        )
+
+    @app.post("/admin/verification-extraction/test")
+    def admin_test_verification_extraction_settings(
+        request: Request,
+        base_url: str = Form(""),
+        api_key: str = Form(""),
+        model: str = Form(""),
+        timeout_seconds: str = Form("10"),
+        clear_api_key: bool = Form(False),
+    ) -> JSONResponse:
+        if not _is_admin(request):
+            return _json_error("登录已失效，请重新登录", status.HTTP_401_UNAUTHORIZED)
+        if clear_api_key:
+            return _json_error("已勾选清除密钥，无法测试 AI 接口", status.HTTP_400_BAD_REQUEST)
+
+        saved = _get_verification_settings(request)
+        try:
+            normalized_base_url = validate_openai_base_url(base_url)
+            normalized_api_key = api_key.strip() or saved.api_key
+            normalized_model = model.strip()
+            normalized_timeout = int(timeout_seconds)
+            if not 1 <= normalized_timeout <= 60:
+                raise ValueError("verification ai timeout is invalid")
+            if not normalized_base_url or not normalized_api_key or not normalized_model:
+                raise ValueError("verification ai config is incomplete")
+
+            code = OpenAICompatibleCodeExtractor(
+                base_url=normalized_base_url,
+                api_key=normalized_api_key,
+                model=normalized_model,
+                timeout_seconds=normalized_timeout,
+                transport=getattr(request.app.state, "verification_ai_transport", None),
+            ).extract(
+                subject="CloudMail interface test",
+                text="Your verification code is TEST-7Q9.",
+                html_content="",
+            )
+            if code != "TEST-7Q9":
+                raise VerificationExtractionError("AI 接口可访问，但未正确返回测试验证码")
+        except ValueError as exc:
+            return _json_error(
+                _translate_store_error(str(exc)),
+                status.HTTP_400_BAD_REQUEST,
+            )
+        except VerificationExtractionError as exc:
+            return _json_error(str(exc), status.HTTP_502_BAD_GATEWAY)
+
+        return _api_json(
+            {
+                "ok": True,
+                "message": f"接口测试成功，模型 {normalized_model} 已正确返回 TEST-7Q9",
+            }
         )
 
     @app.post("/admin/keys")

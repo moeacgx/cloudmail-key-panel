@@ -59,8 +59,16 @@ class OpenAICompatibleCodeExtractor:
                 )
                 response.raise_for_status()
                 body = response.json()
-        except (httpx.HTTPError, ValueError) as exc:
-            raise VerificationExtractionError("AI 验证码提取请求失败") from exc
+        except httpx.HTTPStatusError as exc:
+            raise VerificationExtractionError(
+                f"AI 接口请求失败（HTTP {exc.response.status_code}）"
+            ) from exc
+        except httpx.TimeoutException as exc:
+            raise VerificationExtractionError("AI 接口请求超时") from exc
+        except httpx.HTTPError as exc:
+            raise VerificationExtractionError("AI 接口连接失败") from exc
+        except ValueError as exc:
+            raise VerificationExtractionError("AI 接口返回的不是有效 JSON") from exc
 
         content = _response_content(body)
         code = _parse_ai_code(content)
