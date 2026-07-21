@@ -35,3 +35,21 @@ def test_extract_verification_codes_keeps_generic_codes_in_source_order() -> Non
     codes = extract_verification_codes(text="6NQ-Y60 appeared before 445566 and 6nq-y60.")
 
     assert codes == ["6NQ-Y60", "445566"]
+
+
+def test_mixed_alphanumeric_rule_does_not_treat_plain_words_as_codes() -> None:
+    pattern = (
+        r"(?<![A-Z0-9])(?P<code>(?=[A-Z0-9]{0,5}\d)"
+        r"(?=[A-Z0-9]{0,5}[A-Z])[A-Z0-9]{6})(?![A-Z0-9])"
+    )
+
+    assert extract_verification_codes(
+        text="Please verify account before login",
+        custom_patterns=(pattern,),
+        include_defaults=False,
+    ) == []
+    assert extract_verification_codes(
+        text="Your code is AB12CD",
+        custom_patterns=(pattern,),
+        include_defaults=False,
+    ) == ["AB12CD"]

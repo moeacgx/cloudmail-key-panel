@@ -1,0 +1,188 @@
+<script>
+  (() => {
+    const presets = {
+      digits4: { label: '4 位数字', pattern: String.raw`(?<!\d)(?P<code>\d{4})(?!\d)` },
+      digits6: { label: '6 位数字', pattern: String.raw`(?<!\d)(?P<code>\d{6})(?!\d)` },
+      digits8: { label: '8 位数字', pattern: String.raw`(?<!\d)(?P<code>\d{8})(?!\d)` },
+      digits4to8: { label: '4～8 位数字', pattern: String.raw`(?<!\d)(?P<code>\d{4,8})(?!\d)` },
+      alnum6: { label: '6 位字母数字混合', pattern: String.raw`(?<![A-Z0-9])(?P<code>(?=[A-Z0-9]{0,5}\d)(?=[A-Z0-9]{0,5}[A-Z])[A-Z0-9]{6})(?![A-Z0-9])` },
+      'xxx-xxx': { label: 'XXX-XXX', pattern: String.raw`(?<![A-Z0-9])(?P<code>(?=[A-Z0-9-]*\d)(?=[A-Z0-9-]*[A-Z])[A-Z0-9]{3}-[A-Z0-9]{3})(?![A-Z0-9])` },
+      'xxxx-xxxx': { label: 'XXXX-XXXX', pattern: String.raw`(?<![A-Z0-9])(?P<code>(?=[A-Z0-9-]*\d)(?=[A-Z0-9-]*[A-Z])[A-Z0-9]{4}-[A-Z0-9]{4})(?![A-Z0-9])` },
+    };
+    const tokenDefinitions = {
+      digits: { label: '数字', source: '\\d' },
+      letters: { label: '英文字母', source: '[A-Z]' },
+      alnum: { label: '字母数字混合', source: '[A-Z0-9]' },
+    };
+    const maxRules = 20;
+
+    const linesFrom = (textarea) => textarea.value
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    document.querySelectorAll('[data-code-rule-builder]').forEach((builder) => {
+      const textarea = builder.querySelector('[data-rule-patterns]');
+      const list = builder.querySelector('[data-rule-list]');
+      const listEmpty = builder.querySelector('[data-rule-list-empty]');
+      const count = builder.querySelector('[data-rule-count]');
+      const lengthInput = builder.querySelector('[data-rule-length]');
+      const composerParts = builder.querySelector('[data-rule-composer-parts]');
+      const composerEmpty = builder.querySelector('[data-rule-composer-empty]');
+      const humanPreview = builder.querySelector('[data-rule-human-preview]');
+      const addComposed = builder.querySelector('[data-rule-add-composed]');
+      const undo = builder.querySelector('[data-rule-undo]');
+      const clearComposer = builder.querySelector('[data-rule-clear-composer]');
+      const parts = [];
+
+      const describeComposedPattern = (pattern) => {
+        const prefix = '(?<![A-Za-z0-9])(?P<code>';
+        const suffix = ')(?![A-Za-z0-9])';
+        if (!pattern.startsWith(prefix) || !pattern.endsWith(suffix)) return '';
+        let remaining = pattern.slice(prefix.length, -suffix.length);
+        const descriptions = [];
+        const segmentTypes = [
+          { expression: /^\\d\{(\d+)\}/, label: '位数字' },
+          { expression: /^\[A-Z\]\{(\d+)\}/, label: '位英文字母' },
+          { expression: /^\(\?=\[A-Z0-9\]\{0,(\d+)\}\\d\)\(\?=\[A-Z0-9\]\{0,\d+\}\[A-Z\]\)\[A-Z0-9\]\{(\d+)\}/, label: '位字母数字混合', mixed: true },
+        ];
+        while (remaining) {
+          const segment = segmentTypes
+            .map((type) => ({ type, match: remaining.match(type.expression) }))
+            .find((candidate) => candidate.match);
+          if (segment) {
+            const length = segment.type.mixed ? segment.match[2] : segment.match[1];
+            descriptions.push(`${length} ${segment.type.label}`);
+            remaining = remaining.slice(segment.match[0].length);
+            continue;
+          }
+          if (['-', '_', '/'].includes(remaining[0])) {
+            descriptions.push(`“${remaining[0]}”`);
+            remaining = remaining.slice(1);
+            continue;
+          }
+          return '';
+        }
+        return descriptions.join(' + ');
+      };
+      const friendlyLabel = (pattern, index) => (
+        Object.values(presets).find((preset) => preset.pattern === pattern)?.label
+        || describeComposedPattern(pattern)
+        || `高级规则 ${index + 1}`
+      );
+      const writeLines = (patterns) => {
+        textarea.value = [...new Set(patterns)].join('\n');
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      };
+      const addPattern = (pattern) => {
+        const patterns = linesFrom(textarea);
+        if (patterns.includes(pattern)) return;
+        if (patterns.length >= maxRules) {
+          window.alert('验证码规则最多添加 20 条');
+          return;
+        }
+        writeLines([...patterns, pattern]);
+        renderRules();
+      };
+      const renderRules = () => {
+        const patterns = linesFrom(textarea);
+        list.replaceChildren();
+        patterns.forEach((pattern, index) => {
+          const row = document.createElement('div');
+          row.className = 'flex items-start gap-2 rounded-box border border-base-300 bg-base-100 px-3 py-2';
+          const content = document.createElement('div');
+          content.className = 'min-w-0 flex-1';
+          const label = document.createElement('div');
+          label.className = 'text-sm font-medium';
+          label.textContent = friendlyLabel(pattern, index);
+          const hint = document.createElement('div');
+          hint.className = 'mt-1 text-xs text-base-content/45';
+          hint.textContent = friendlyLabel(pattern, index).startsWith('高级规则')
+            ? '在高级设置中维护'
+            : '可直接用于提取验证码';
+          const remove = document.createElement('button');
+          remove.type = 'button';
+          remove.className = 'btn btn-ghost btn-xs text-error';
+          remove.textContent = '移除';
+          remove.addEventListener('click', () => {
+            writeLines(patterns.filter((_, patternIndex) => patternIndex !== index));
+            renderRules();
+          });
+          content.append(label, hint);
+          row.append(content, remove);
+          list.appendChild(row);
+        });
+        count.textContent = `${patterns.length} / ${maxRules}`;
+        listEmpty.hidden = patterns.length > 0;
+      };
+      const renderComposer = () => {
+        composerParts.replaceChildren();
+        parts.forEach((part) => {
+          const badge = document.createElement('span');
+          badge.className = 'badge badge-outline badge-sm';
+          badge.textContent = part.label;
+          composerParts.appendChild(badge);
+        });
+        const hasParts = parts.length > 0;
+        composerEmpty.hidden = hasParts;
+        const hasVariable = parts.some((part) => part.kind === 'token');
+        addComposed.disabled = !hasVariable;
+        undo.disabled = !hasParts;
+        clearComposer.disabled = !hasParts;
+        humanPreview.textContent = hasParts
+          ? `结构预览：${parts.map((part) => part.label).join(' + ')}`
+          : '结构预览：尚未组成规则';
+      };
+      const resetComposer = () => {
+        parts.splice(0, parts.length);
+        renderComposer();
+      };
+
+      builder.querySelectorAll('[data-rule-preset]').forEach((button) => {
+        button.addEventListener('click', () => addPattern(presets[button.dataset.rulePreset].pattern));
+      });
+      builder.querySelectorAll('[data-rule-token]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const definition = tokenDefinitions[button.dataset.ruleToken];
+          const length = Math.max(1, Math.min(Number(lengthInput.value) || 1, 12));
+          if (button.dataset.ruleToken === 'alnum' && length < 2) {
+            window.alert('字母数字混合至少需要 2 位');
+            return;
+          }
+          const source = button.dataset.ruleToken === 'alnum'
+            ? `(?=[A-Z0-9]{0,${length - 1}}\\d)(?=[A-Z0-9]{0,${length - 1}}[A-Z])[A-Z0-9]{${length}}`
+            : `${definition.source}{${length}}`;
+          parts.push({
+            kind: 'token',
+            label: `${length} 位${definition.label}`,
+            source,
+          });
+          renderComposer();
+        });
+      });
+      builder.querySelectorAll('[data-rule-literal]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const literal = button.dataset.ruleLiteral;
+          parts.push({ kind: 'literal', label: `“${literal}”`, source: literal });
+          renderComposer();
+        });
+      });
+      addComposed.addEventListener('click', () => {
+        const body = parts.map((part) => part.source).join('');
+        addPattern(`(?<![A-Za-z0-9])(?P<code>${body})(?![A-Za-z0-9])`);
+        resetComposer();
+      });
+      undo.addEventListener('click', () => {
+        parts.pop();
+        renderComposer();
+      });
+      clearComposer.addEventListener('click', resetComposer);
+      textarea.addEventListener('input', renderRules);
+      textarea.addEventListener('change', renderRules);
+      builder.addEventListener('code-rule-builder:reset-composer', resetComposer);
+
+      renderRules();
+      renderComposer();
+    });
+  })();
+</script>

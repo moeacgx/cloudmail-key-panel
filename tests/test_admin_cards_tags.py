@@ -97,6 +97,9 @@ def test_admin_can_save_multiple_code_patterns_and_ai_mode_per_tag(tmp_path) -> 
 
     assert response.status_code == 200
     assert "AI 兜底" in response.text
+    assert 'data-rule-preset="xxx-xxx"' in response.text
+    assert "点击变量，按验证码出现顺序拼接" in response.text
+    assert "高级：直接编辑正则" in response.text
     assert tag is not None
     assert tag.code_patterns == (
         r"\b(?P<code>[A-Z0-9]{3}-[A-Z0-9]{3})\b",

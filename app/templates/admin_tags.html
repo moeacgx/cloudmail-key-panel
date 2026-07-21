@@ -86,11 +86,11 @@
             <option value="ai_only">仅使用 AI</option>
           </select>
         </label>
-        <label class="grid gap-2">
-          <span class="text-sm font-medium">自定义验证码正则（可选）</span>
-          <textarea class="textarea textarea-bordered min-h-28 font-mono text-xs" name="code_patterns" placeholder="一行一条，例如：&#10;\b(?P&lt;code&gt;[A-Z0-9]{3}-[A-Z0-9]{3})\b"></textarea>
-          <span class="text-xs leading-5 text-base-content/45">优先使用名为 code 的捕获组，其次使用第一个捕获组；没有捕获组时返回完整匹配。最多 20 条。</span>
-        </label>
+        {% set rule_builder_title = '该平台的验证码规则' %}
+        {% set rule_builder_name = 'code_patterns' %}
+        {% set rule_builder_value = '' %}
+        {% set rule_builder_edit_selector = false %}
+        {% include '_verification_rule_builder.html' %}
         <button class="btn btn-primary" type="submit">创建标签</button>
       </form>
     </div>
@@ -184,13 +184,18 @@
       <label class="grid gap-2"><span class="text-sm font-medium">发件人规则</span><textarea class="textarea textarea-bordered min-h-24" name="sender_patterns" data-edit-tag-senders></textarea><span class="text-xs leading-5 text-base-content/45">留空时按标签名称启用内置规则；填写后覆盖内置规则，并兼容 CloudMail 改写的 iCloud 发件人。</span></label>
       <label class="grid gap-2"><span class="text-sm font-medium">主题关键词</span><textarea class="textarea textarea-bordered min-h-24" name="subject_keywords" data-edit-tag-subjects></textarea></label>
       <label class="grid gap-2"><span class="text-sm font-medium">验证码提取方式</span><select class="select select-bordered" name="extraction_mode" data-edit-tag-extraction-mode><option value="rules">规则提取</option><option value="ai_fallback">规则失败后 AI 兜底</option><option value="ai_only">仅使用 AI</option></select></label>
-      <label class="grid gap-2"><span class="text-sm font-medium">自定义验证码正则</span><textarea class="textarea textarea-bordered min-h-28 font-mono text-xs" name="code_patterns" data-edit-tag-code-patterns></textarea><span class="text-xs leading-5 text-base-content/45">一行一条；优先读取命名组 code，其次第一个捕获组，否则使用完整匹配。</span></label>
+      {% set rule_builder_title = '该平台的验证码规则' %}
+      {% set rule_builder_name = 'code_patterns' %}
+      {% set rule_builder_value = '' %}
+      {% set rule_builder_edit_selector = true %}
+      {% include '_verification_rule_builder.html' %}
       <div class="modal-action"><button type="submit" class="btn btn-primary">保存修改</button><button type="button" class="btn btn-ghost" data-close-tag-dialog>取消</button></div>
     </form>
   </div>
   <form method="dialog" class="modal-backdrop"><button>关闭</button></form>
 </dialog>
 
+{% include '_verification_rule_builder_script.html' %}
 <script>
   (() => {
     const colorInput = document.querySelector('[data-tag-color]');
@@ -214,7 +219,10 @@
       form.querySelector('[data-edit-tag-color]').value = button.dataset.color || '#6366f1';
       form.querySelector('[data-edit-tag-senders]').value = button.dataset.senderPatterns || '';
       form.querySelector('[data-edit-tag-subjects]').value = button.dataset.subjectKeywords || '';
-      form.querySelector('[data-edit-tag-code-patterns]').value = button.dataset.codePatterns || '';
+      const codePatterns = form.querySelector('[data-edit-tag-code-patterns]');
+      codePatterns.value = button.dataset.codePatterns || '';
+      codePatterns.dispatchEvent(new Event('input', { bubbles: true }));
+      codePatterns.closest('[data-code-rule-builder]')?.dispatchEvent(new Event('code-rule-builder:reset-composer'));
       form.querySelector('[data-edit-tag-extraction-mode]').value = button.dataset.extractionMode || 'rules';
       form.querySelector('[data-edit-tag-prevents-reuse]').checked = button.dataset.preventsReuse === 'true';
       form.querySelector('[data-edit-tag-alias-use-limit]').value = button.dataset.aliasUseLimit || '0';

@@ -135,11 +135,11 @@
             <option value="only"{% if verification_config.mode == 'only' %} selected{% endif %}>所有平台仅使用 AI</option>
           </select>
         </label>
-        <label class="grid gap-2">
-          <span class="text-sm font-medium">自定义验证码正则</span>
-          <textarea class="textarea textarea-bordered min-h-32 font-mono text-xs" name="custom_patterns" placeholder="一行一条，例如：&#10;\b(?P&lt;code&gt;[A-Z0-9]{3}-[A-Z0-9]{3})\b">{{ verification_config.custom_patterns | join('\n') }}</textarea>
-          <span class="text-xs leading-5 text-base-content/45">最多 20 条；优先读取命名组 code，其次第一个捕获组，否则使用完整匹配。</span>
-        </label>
+        {% set rule_builder_title = '验证码提取规则' %}
+        {% set rule_builder_name = 'custom_patterns' %}
+        {% set rule_builder_value = verification_config.custom_patterns | join('\n') %}
+        {% set rule_builder_edit_selector = false %}
+        {% include '_verification_rule_builder.html' %}
         <label class="grid gap-2">
           <span class="text-sm font-medium">OpenAI 兼容接口地址</span>
           <input class="input input-bordered w-full" type="url" name="base_url" value="{{ verification_config.base_url }}" placeholder="https://api.openai.com/v1">
@@ -435,6 +435,7 @@
   </div>
 </section>
 
+{% include '_verification_rule_builder_script.html' %}
 <script>
   (() => {
     const cloudmailDialog = document.getElementById('cloudmail-config-dialog');

@@ -1,0 +1,77 @@
+<div class="grid gap-3 rounded-box border border-base-300 bg-base-200/30 p-4" data-code-rule-builder>
+  <div>
+    <span class="text-sm font-medium">{{ rule_builder_title | default('验证码规则') }}</span>
+    <p class="mt-1 text-xs leading-5 text-base-content/50">直接选常用格式，或者按顺序点击变量组成验证码，不需要自己写正则。</p>
+  </div>
+
+  <div class="grid gap-2">
+    <span class="text-xs font-medium text-base-content/65">常用规则</span>
+    <div class="flex flex-wrap gap-2">
+      <button type="button" class="btn btn-outline btn-xs" data-rule-preset="digits4">4 位数字</button>
+      <button type="button" class="btn btn-outline btn-xs" data-rule-preset="digits6">6 位数字</button>
+      <button type="button" class="btn btn-outline btn-xs" data-rule-preset="digits8">8 位数字</button>
+      <button type="button" class="btn btn-outline btn-xs" data-rule-preset="digits4to8">4～8 位数字</button>
+      <button type="button" class="btn btn-outline btn-xs" data-rule-preset="alnum6">6 位字母数字混合</button>
+      <button type="button" class="btn btn-outline btn-xs" data-rule-preset="xxx-xxx">XXX-XXX</button>
+      <button type="button" class="btn btn-outline btn-xs" data-rule-preset="xxxx-xxxx">XXXX-XXXX</button>
+    </div>
+  </div>
+
+  <div class="grid gap-3 rounded-box border border-base-content/10 bg-base-100 p-3">
+    <div class="flex flex-wrap items-end gap-2">
+      <label class="grid gap-1">
+        <span class="text-xs font-medium text-base-content/65">变量长度</span>
+        <select class="select select-bordered select-sm" data-rule-length>
+          {% for length in range(1, 13) %}
+            <option value="{{ length }}"{% if length == 3 %} selected{% endif %}>{{ length }} 位</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div class="grid flex-1 gap-1">
+        <span class="text-xs font-medium text-base-content/65">点击变量，按验证码出现顺序拼接</span>
+        <div class="flex flex-wrap gap-1.5">
+          <button type="button" class="btn btn-ghost btn-xs border border-base-300" data-rule-token="digits">数字</button>
+          <button type="button" class="btn btn-ghost btn-xs border border-base-300" data-rule-token="letters">英文字母</button>
+          <button type="button" class="btn btn-ghost btn-xs border border-base-300" data-rule-token="alnum">字母数字混合</button>
+          <button type="button" class="btn btn-ghost btn-xs border border-base-300" data-rule-literal="-">连字符 -</button>
+          <button type="button" class="btn btn-ghost btn-xs border border-base-300" data-rule-literal="_">下划线 _</button>
+          <button type="button" class="btn btn-ghost btn-xs border border-base-300" data-rule-literal="/">斜杠 /</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="min-h-10 rounded-box border border-dashed border-base-300 px-3 py-2" data-rule-composer>
+      <span class="text-xs text-base-content/40" data-rule-composer-empty>尚未添加变量，例如依次点击“字母数字、连字符、字母数字”。</span>
+      <div class="flex flex-wrap items-center gap-1.5" data-rule-composer-parts></div>
+    </div>
+    <p class="text-xs text-base-content/55" data-rule-human-preview>结构预览：尚未组成规则</p>
+    <div class="flex flex-wrap gap-2">
+      <button type="button" class="btn btn-primary btn-sm" data-rule-add-composed disabled>添加这条规则</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-rule-undo disabled>撤销一步</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-rule-clear-composer disabled>清空结构</button>
+    </div>
+  </div>
+
+  <div class="grid gap-2">
+    <div class="flex items-center justify-between gap-3">
+      <span class="text-xs font-medium text-base-content/65">已启用规则</span>
+      <span class="text-xs text-base-content/45" data-rule-count>0 / 20</span>
+    </div>
+    <div class="grid gap-2" data-rule-list></div>
+    <div class="rounded-box border border-dashed border-base-300 px-3 py-3 text-center text-xs text-base-content/45" data-rule-list-empty>尚未添加自定义规则，系统仍会使用内置验证码规则。</div>
+  </div>
+
+  <details class="collapse collapse-arrow border border-base-300 bg-base-100">
+    <summary class="collapse-title min-h-0 px-4 py-3 text-sm font-medium">高级：直接编辑正则</summary>
+    <div class="collapse-content px-4 pb-4">
+      <textarea
+        class="textarea textarea-bordered min-h-28 w-full font-mono text-xs"
+        name="{{ rule_builder_name }}"
+        data-rule-patterns
+        {% if rule_builder_edit_selector | default(false) %}data-edit-tag-code-patterns{% endif %}
+        placeholder="一行一条正则"
+      >{{ rule_builder_value | default('') }}</textarea>
+      <p class="mt-2 text-xs leading-5 text-base-content/45">最多 20 条；优先读取命名组 code，其次第一个捕获组，否则使用完整匹配。</p>
+    </div>
+  </details>
+</div>
