@@ -285,11 +285,21 @@ def test_verification_ai_blank_key_is_preserved_and_can_be_cleared(tmp_path) -> 
     )
 
     preserved = store.save_verification_extraction_settings(
-        base_url="https://ai.example.com/v1",
+        base_url="https://ai.example.com/v2",
         api_key="",
         model="extract-model-v2",
     )
     assert preserved.api_key == "secret-key"
+
+    with pytest.raises(ValueError, match="api key is required for changed origin"):
+        store.save_verification_extraction_settings(
+            base_url="https://other-ai.example.com/v1",
+            api_key="",
+            model="extract-model-v2",
+        )
+    unchanged = store.get_verification_extraction_settings()
+    assert unchanged.base_url == "https://ai.example.com/v2"
+    assert unchanged.api_key == "secret-key"
 
     cleared = store.save_verification_extraction_settings(
         mode="fallback",

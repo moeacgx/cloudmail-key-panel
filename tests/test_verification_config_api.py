@@ -65,10 +65,48 @@ def test_admin_can_test_unsaved_ai_config_without_persisting_it(tmp_path) -> Non
     assert saved.model == ""
 
 
-def test_ai_config_test_reuses_saved_api_key_and_masks_upstream_failure(tmp_path) -> None:
+def test_ai_config_test_reuses_saved_api_key_on_same_origin(tmp_path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["Authorization"] == "Bearer saved-secret"
         return httpx.Response(401, text="upstream-secret-error")
+
+    client, store = _create_test_client(tmp_path, handler)
+    store.save_verification_extraction_settings(
+        base_url="https://new.example.com/legacy",
+        api_key="saved-secret",
+        model="old-model",
+    )
+    client.post("/admin/login", data={"username": "admin", "password": "pass123"})
+
+    response = client.post(
+        "/admin/verification-extraction/test",
+        data={
+            "base_url": "https://new.example.com/v1",
+            "api_key": "",
+            "model": "new-model",
+            "timeout_seconds": "5",
+        },
+    )
+
+    assert response.status_code == 424
+    assert response.json()["error"] == (
+        "AI 接口拒绝了当前密钥（HTTP 401），请重新填写该接口对应的 API Key"
+    )
+    assert "saved-secret" not in response.text
+    assert "upstream-secret-error" not in response.text
+    saved = store.get_verification_extraction_settings()
+    assert saved.base_url == "https://new.example.com/legacy"
+    assert saved.api_key == "saved-secret"
+    assert saved.model == "old-model"
+
+
+def test_ai_config_test_does_not_send_saved_key_to_changed_origin(tmp_path) -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200)
 
     client, store = _create_test_client(tmp_path, handler)
     store.save_verification_extraction_settings(
@@ -88,14 +126,9 @@ def test_ai_config_test_reuses_saved_api_key_and_masks_upstream_failure(tmp_path
         },
     )
 
-    assert response.status_code == 502
-    assert response.json()["error"] == "AI 接口请求失败（HTTP 401）"
-    assert "saved-secret" not in response.text
-    assert "upstream-secret-error" not in response.text
-    saved = store.get_verification_extraction_settings()
-    assert saved.base_url == "https://old.example.com/v1"
-    assert saved.api_key == "saved-secret"
-    assert saved.model == "old-model"
+    assert response.status_code == 400
+    assert response.json()["error"] == "接口域名已改变，请重新填写这个接口对应的 API Key"
+    assert calls == 0
 
 
 def test_ai_config_test_requires_admin_and_complete_config(tmp_path) -> None:
@@ -132,3 +165,26 @@ def test_ai_config_test_requires_admin_and_complete_config(tmp_path) -> None:
     assert clearing.status_code == 400
     assert clearing.json()["error"] == "已勾选清除密钥，无法测试 AI 接口"
     assert calls == 0
+
+
+def test_ai_config_test_explains_non_json_endpoint(tmp_path) -> None:
+    client, _ = _create_test_client(
+        tmp_path,
+        lambda _request: httpx.Response(200, text="<html>website homepage</html>"),
+    )
+    client.post("/admin/login", data={"username": "admin", "password": "pass123"})
+
+    response = client.post(
+        "/admin/verification-extraction/test",
+        data={
+            "base_url": "https://website.example.com",
+            "api_key": "secret",
+            "model": "test-model",
+            "timeout_seconds": "5",
+        },
+    )
+
+    assert response.status_code == 424
+    assert response.json()["error"] == (
+        "AI 接口返回的不是 JSON，请确认填写的是 /v1 接口地址而不是网站首页"
+    )

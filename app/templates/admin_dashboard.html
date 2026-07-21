@@ -151,7 +151,8 @@
         </label>
         <label class="grid gap-2">
           <span class="text-sm font-medium">API Key</span>
-          <input class="input input-bordered w-full" type="password" name="api_key" value="" placeholder="{{ '已配置，留空保持不变' if verification_config.api_key else '尚未配置' }}" autocomplete="new-password">
+          <input class="input input-bordered w-full" type="password" name="api_key" value="" placeholder="{{ '已配置；接口域名不变时可留空' if verification_config.api_key else '尚未配置' }}" autocomplete="new-password">
+          <span class="text-xs leading-5 text-base-content/45">只修改同一域名下的路径可复用密钥；更换接口域名时必须重新填写对应的 API Key。</span>
         </label>
         {% if verification_config.api_key %}
           <label class="flex cursor-pointer items-center gap-3">

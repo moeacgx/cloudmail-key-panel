@@ -35,6 +35,7 @@ from app.verification_extractor import (
     OpenAICompatibleCodeExtractor,
     VerificationCodeExtractor,
     VerificationExtractionError,
+    openai_base_urls_share_origin,
     validate_openai_base_url,
 )
 
@@ -1052,7 +1053,15 @@ def create_app(
         saved = _get_verification_settings(request)
         try:
             normalized_base_url = validate_openai_base_url(base_url)
-            normalized_api_key = api_key.strip() or saved.api_key
+            submitted_api_key = api_key.strip()
+            if submitted_api_key:
+                normalized_api_key = submitted_api_key
+            elif openai_base_urls_share_origin(normalized_base_url, saved.base_url):
+                normalized_api_key = saved.api_key
+            elif saved.api_key:
+                raise ValueError("verification ai api key is required for changed origin")
+            else:
+                normalized_api_key = ""
             normalized_model = model.strip()
             normalized_timeout = int(timeout_seconds)
             if not 1 <= normalized_timeout <= 60:
@@ -1079,7 +1088,16 @@ def create_app(
                 status.HTTP_400_BAD_REQUEST,
             )
         except VerificationExtractionError as exc:
-            return _json_error(str(exc), status.HTTP_502_BAD_GATEWAY)
+            message = str(exc)
+            if "HTTP 401" in message:
+                message = "AI 接口拒绝了当前密钥（HTTP 401），请重新填写该接口对应的 API Key"
+            elif "HTTP 403" in message:
+                message = "AI 接口拒绝访问（HTTP 403），请检查密钥权限和模型权限"
+            elif "HTTP 404" in message:
+                message = "AI 接口路径不存在（HTTP 404），通常应填写到 /v1"
+            elif message == "AI 接口返回的不是有效 JSON":
+                message = "AI 接口返回的不是 JSON，请确认填写的是 /v1 接口地址而不是网站首页"
+            return _json_error(message, status.HTTP_424_FAILED_DEPENDENCY)
 
         return _api_json(
             {
@@ -2043,6 +2061,7 @@ def _translate_store_error(message: str) -> str:
         "verification ai base url is invalid": "AI 接口地址无效，请填写 http 或 https 地址",
         "verification ai config is incomplete": "AI 接口地址、密钥和模型必须同时填写",
         "verification ai config is required": "AI 兜底或仅 AI 模式必须完整配置接口地址、密钥和模型",
+        "verification ai api key is required for changed origin": "接口域名已改变，请重新填写这个接口对应的 API Key",
         "verification ai timeout is invalid": "AI 请求超时必须是 1 到 60 秒的整数",
         "verification extraction global mode is invalid": "全局验证码提取模式无效",
         "verification extraction mode is invalid": "验证码提取模式无效",

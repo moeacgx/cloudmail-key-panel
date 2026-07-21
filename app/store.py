@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.verification_extractor import (
     VALID_EXTRACTION_MODES,
+    openai_base_urls_share_origin,
     validate_custom_patterns,
     validate_openai_base_url,
 )
@@ -3119,7 +3120,13 @@ class KeyStore:
             normalized_model = ""
         else:
             normalized_base_url = validate_openai_base_url(base_url)
-            normalized_api_key = api_key.strip() or existing.api_key
+            submitted_api_key = api_key.strip()
+            if submitted_api_key:
+                normalized_api_key = submitted_api_key
+            elif openai_base_urls_share_origin(normalized_base_url, existing.base_url):
+                normalized_api_key = existing.api_key
+            else:
+                normalized_api_key = ""
             normalized_model = model.strip()
         try:
             normalized_timeout = int(timeout_seconds)
@@ -3128,6 +3135,15 @@ class KeyStore:
         if not 1 <= normalized_timeout <= 60:
             raise ValueError("verification ai timeout is invalid")
         configured_fields = (normalized_base_url, normalized_api_key, normalized_model)
+        if (
+            not clear_api_key
+            and not api_key.strip()
+            and existing.api_key
+            and normalized_base_url
+            and normalized_model
+            and not openai_base_urls_share_origin(normalized_base_url, existing.base_url)
+        ):
+            raise ValueError("verification ai api key is required for changed origin")
         if any(configured_fields) and not all(configured_fields):
             raise ValueError("verification ai config is incomplete")
         if normalized_mode in {"fallback", "only"} and not all(configured_fields):

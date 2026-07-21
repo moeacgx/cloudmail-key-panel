@@ -112,6 +112,22 @@ def validate_openai_base_url(value: str) -> str:
     return normalized
 
 
+def openai_base_urls_share_origin(first: str, second: str) -> bool:
+    try:
+        left = urlsplit(validate_openai_base_url(first))
+        right = urlsplit(validate_openai_base_url(second))
+    except ValueError:
+        return False
+    if not left.netloc or not right.netloc:
+        return False
+
+    def origin(parts) -> tuple[str, str, int | None]:
+        default_port = 443 if parts.scheme == "https" else 80
+        return parts.scheme.lower(), (parts.hostname or "").lower(), parts.port or default_port
+
+    return origin(left) == origin(right)
+
+
 def validate_custom_patterns(patterns: Iterable[str]) -> tuple[str, ...]:
     normalized: list[str] = []
     for value in patterns:

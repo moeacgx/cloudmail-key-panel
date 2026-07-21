@@ -7,6 +7,7 @@ from app.verification_extractor import (
     OpenAICompatibleCodeExtractor,
     VerificationCodeExtractor,
     VerificationExtractionError,
+    openai_base_urls_share_origin,
 )
 
 
@@ -106,3 +107,14 @@ def test_ai_fallback_without_configuration_is_not_treated_as_no_code() -> None:
 
     with pytest.raises(VerificationExtractionError, match="尚未配置"):
         extractor.extract("Unknown token format: AB/CD", "", "")
+
+
+def test_openai_origin_comparison_allows_path_changes_only() -> None:
+    assert openai_base_urls_share_origin(
+        "https://ai.example.com/legacy",
+        "https://AI.example.com:443/v1",
+    )
+    assert not openai_base_urls_share_origin(
+        "https://ai.example.com/v1",
+        "https://other.example.com/v1",
+    )
