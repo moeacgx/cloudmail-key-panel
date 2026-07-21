@@ -346,10 +346,10 @@ def test_skipping_primary_address_advances_but_alias_mode_can_keep_root(tmp_path
 
 def test_independent_mailbox_uses_only_pristine_family_and_adds_no_service_tag(tmp_path) -> None:
     store = KeyStore(tmp_path / "app.db")
-    used = store.create_mapping("used@icloud.com")
+    platform_tagged = store.create_mapping("platform-tagged@icloud.com")
     fresh = store.create_mapping("fresh@icloud.com", category="库存 A")
     old_tag = store.create_tag("Claude")
-    store.add_mapping_tag(used.id, old_tag.id, source="usage")
+    store.add_mapping_tag(platform_tagged.id, old_tag.id, source="manual")
     system_tag = store.ensure_independent_system_tag()
     _batch, card = _create_batch(
         store,
@@ -369,6 +369,38 @@ def test_independent_mailbox_uses_only_pristine_family_and_adds_no_service_tag(t
     assert completed.status == "completed"
     assert store.get_by_id(fresh.id).reuse_policy == "independent"
     assert [tag.name for tag in store.list_mapping_tags(fresh.id)] == ["库存 A"]
+
+
+def test_never_used_scope_excludes_manual_platform_tags_but_keeps_business_tags(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    platform_tagged = store.create_mapping("platform-tagged@icloud.com")
+    business_tagged = store.create_mapping("business-tagged@icloud.com")
+    platform_tag = store.create_tag("OpenAI", kind="service")
+    business_tag = store.create_tag("库存 A", kind="business")
+    target_tag = store.create_tag("Grok", kind="service")
+    store.add_mapping_tag(platform_tagged.id, platform_tag.id, source="manual")
+    store.add_mapping_tag(business_tagged.id, business_tag.id, source="manual")
+    _batch, card = _create_batch(store, tag_id=target_tag.id, source_scope="never_used")
+
+    claim = store.start_registration_claim(card.code)
+
+    assert claim.mapping_id == business_tagged.id
+    assert not store.is_mapping_fully_unused(platform_tagged.id)
+    assert store.is_mapping_fully_unused(business_tagged.id)
+
+
+def test_used_reusable_scope_includes_manual_platform_tags(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    platform_tagged = store.create_mapping("platform-tagged@icloud.com")
+    store.create_mapping("pristine@icloud.com")
+    platform_tag = store.create_tag("OpenAI", kind="service")
+    target_tag = store.create_tag("Grok", kind="service")
+    store.add_mapping_tag(platform_tagged.id, platform_tag.id, source="manual")
+    _batch, card = _create_batch(store, tag_id=target_tag.id, source_scope="used_reusable")
+
+    claim = store.start_registration_claim(card.code)
+
+    assert claim.mapping_id == platform_tagged.id
 
 
 def test_claim_history_uses_opaque_token_and_can_be_revoked(tmp_path) -> None:

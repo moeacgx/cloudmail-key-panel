@@ -287,7 +287,13 @@
                   {% endif %}
                   {% if item.reuse_policy | default('reusable') == 'independent' %}<span class="badge badge-info badge-outline">独立邮箱</span>{% endif %}
                   {% if item.reuse_policy | default('reusable') == 'retired' %}<span class="badge badge-ghost">停止复用</span>{% endif %}
-                  <span class="badge badge-ghost">{{ '已成功接码' if item.first_used_at | default('') else '完全未使用' }}</span>
+                  {% if item.usage_state | default('never_used') == 'successful' %}
+                    <span class="badge badge-success badge-outline">已成功接码</span>
+                  {% elif item.usage_state | default('never_used') == 'platform_tagged' %}
+                    <span class="badge badge-info badge-outline">已有平台使用标签</span>
+                  {% else %}
+                    <span class="badge badge-ghost">完全未使用</span>
+                  {% endif %}
                 </div>
                 <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-base-content/50">
                   <span>ID {{ item.id }}</span>

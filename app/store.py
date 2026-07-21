@@ -1287,13 +1287,25 @@ class KeyStore:
                        EXISTS(
                            SELECT 1 FROM registration_claims
                            WHERE root_mapping_id = access_mappings.id AND status = 'completed'
-                       ) AS has_completed_claim
+                       ) AS has_completed_claim,
+                       EXISTS(
+                           SELECT 1
+                           FROM mapping_tags
+                           JOIN categories ON categories.id = mapping_tags.tag_id
+                           WHERE mapping_tags.mapping_id = access_mappings.id
+                             AND categories.kind = 'service'
+                       ) AS has_platform_tag
                 FROM access_mappings
                 WHERE id = ?
                 """,
                 (root_id,),
             ).fetchone()
-        return row is not None and not str(row["first_used_at"] or "") and not bool(row["has_completed_claim"])
+        return (
+            row is not None
+            and not str(row["first_used_at"] or "")
+            and not bool(row["has_completed_claim"])
+            and not bool(row["has_platform_tag"])
+        )
 
     def create_card_category(self, name: str) -> CardCategory:
         normalized_name = unicodedata.normalize("NFKC", name or "").strip()
@@ -1791,12 +1803,18 @@ class KeyStore:
                         "m.first_used_at = ''",
                         "NOT EXISTS (SELECT 1 FROM registration_claims source_claim "
                         "WHERE source_claim.root_mapping_id = m.id AND source_claim.status = 'completed')",
+                        "NOT EXISTS (SELECT 1 FROM mapping_tags platform_tag "
+                        "JOIN categories platform_category ON platform_category.id = platform_tag.tag_id "
+                        "WHERE platform_tag.mapping_id = m.id AND platform_category.kind = 'service')",
                     ]
                 )
             elif source_scope == "used_reusable":
                 clauses.append(
                     "(m.first_used_at != '' OR EXISTS (SELECT 1 FROM registration_claims source_claim "
-                    "WHERE source_claim.root_mapping_id = m.id AND source_claim.status = 'completed'))"
+                    "WHERE source_claim.root_mapping_id = m.id AND source_claim.status = 'completed') "
+                    "OR EXISTS (SELECT 1 FROM mapping_tags platform_tag "
+                    "JOIN categories platform_category ON platform_category.id = platform_tag.tag_id "
+                    "WHERE platform_tag.mapping_id = m.id AND platform_category.kind = 'service'))"
                 )
             for include_tag_id in self._decode_int_values(card["include_tag_ids"]):
                 clauses.append(
@@ -1816,6 +1834,9 @@ class KeyStore:
                         "m.first_used_at = ''",
                         "NOT EXISTS (SELECT 1 FROM mapping_tags existing_tag "
                         "WHERE existing_tag.mapping_id = m.id AND existing_tag.source = 'usage')",
+                        "NOT EXISTS (SELECT 1 FROM mapping_tags platform_tag "
+                        "JOIN categories platform_category ON platform_category.id = platform_tag.tag_id "
+                        "WHERE platform_tag.mapping_id = m.id AND platform_category.kind = 'service')",
                         "NOT EXISTS (SELECT 1 FROM registration_claims completed_claim "
                         "WHERE completed_claim.root_mapping_id = m.id AND completed_claim.status = 'completed')",
                         "NOT EXISTS (SELECT 1 FROM access_mappings child_alias "
@@ -1832,6 +1853,10 @@ class KeyStore:
                     CASE WHEN m.first_used_at != '' OR EXISTS(
                         SELECT 1 FROM registration_claims used_claim
                         WHERE used_claim.root_mapping_id = m.id AND used_claim.status = 'completed'
+                    ) OR EXISTS(
+                        SELECT 1 FROM mapping_tags platform_tag
+                        JOIN categories platform_category ON platform_category.id = platform_tag.tag_id
+                        WHERE platform_tag.mapping_id = m.id AND platform_category.kind = 'service'
                     ) THEN 0 ELSE 1 END,
                     m.id ASC
                 LIMIT 1

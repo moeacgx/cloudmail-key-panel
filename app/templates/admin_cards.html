@@ -128,9 +128,9 @@
             <label class="grid gap-2" data-custom-only hidden>
               <span class="text-sm font-medium">邮箱复用范围</span>
               <select class="select select-bordered w-full" name="source_scope">
-                <option value="all_reusable">全部可用邮箱（优先复用）</option>
-                <option value="used_reusable">仅已使用且可复用</option>
-                <option value="never_used">仅完全未使用</option>
+                <option value="all_reusable">全部可用邮箱（优先已有使用记录）</option>
+                <option value="used_reusable">仅已有使用记录或平台标签</option>
+                <option value="never_used">仅完全未使用（无平台标签）</option>
               </select>
             </label>
             <label class="grid gap-2">
@@ -397,7 +397,7 @@
       const selectedSource = sourceTag?.selectedOptions?.[0];
       const sourceLabel = selectedSource?.value ? selectedSource.textContent.trim() : '尚未选择库存标签';
       if (policySummary) policySummary.textContent = independent
-        ? `独立邮箱 · ${sourceLabel} · 固定发放完全未使用的主邮箱，成功接码后退出共享池。`
+        ? `独立邮箱 · ${sourceLabel} · 固定发放无平台标签且未成功接码的主邮箱，成功后退出共享池。`
         : `定制邮箱 · ${sourceLabel} · 按平台记录使用历史，可在高级设置中开启 iCloud 裂变。`;
     };
     productType?.addEventListener('change', syncProductPolicy);

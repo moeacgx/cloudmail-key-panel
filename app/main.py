@@ -1845,32 +1845,51 @@ def _render_admin_dashboard(
     categories = [tag.name for tag in tags]
     cloudmail_config = _get_cloudmail_settings_for_display(request)
     verification_config = _get_verification_settings(request)
-    display_mappings = [
-        {
-            "id": mapping.id,
-            "recipient_email": mapping.recipient_email,
-            "query_email": mapping.query_email,
-            "access_key": mapping.access_key,
-            "label": mapping.label,
-            "category": request.app.state.store.canonicalize_category(mapping.category),
-            "created_at": _format_timestamp_for_display(mapping.created_at, cloudmail_config.display_timezone),
-            "status": mapping.status,
-            "status_label": MAPPING_STATUS_LABELS.get(mapping.status, mapping.status),
-            "claimed_at": _format_timestamp_for_display(mapping.claimed_at, cloudmail_config.display_timezone),
-            "used_at": _format_timestamp_for_display(mapping.used_at, cloudmail_config.display_timezone),
-            "target_site": mapping.target_site,
-            "tags": list(mapping.tags),
-            "tag_ids": [tag.id for tag in request.app.state.store.list_mapping_tags(mapping.id)],
-            "address_kind": mapping.address_kind,
-            "parent_mapping_id": mapping.parent_mapping_id,
-            "reuse_policy": mapping.reuse_policy,
-            "first_used_at": _format_timestamp_for_display(
-                mapping.first_used_at,
-                cloudmail_config.display_timezone,
-            ),
-        }
-        for mapping in mappings
-    ]
+    display_mappings = []
+    for mapping in mappings:
+        mapping_tags = request.app.state.store.list_mapping_tags(mapping.id)
+        usage_state = (
+            "successful"
+            if mapping.first_used_at
+            else "platform_tagged"
+            if any(tag.kind == "service" for tag in mapping_tags)
+            else "never_used"
+        )
+        display_mappings.append(
+            {
+                "id": mapping.id,
+                "recipient_email": mapping.recipient_email,
+                "query_email": mapping.query_email,
+                "access_key": mapping.access_key,
+                "label": mapping.label,
+                "category": request.app.state.store.canonicalize_category(mapping.category),
+                "created_at": _format_timestamp_for_display(
+                    mapping.created_at,
+                    cloudmail_config.display_timezone,
+                ),
+                "status": mapping.status,
+                "status_label": MAPPING_STATUS_LABELS.get(mapping.status, mapping.status),
+                "claimed_at": _format_timestamp_for_display(
+                    mapping.claimed_at,
+                    cloudmail_config.display_timezone,
+                ),
+                "used_at": _format_timestamp_for_display(
+                    mapping.used_at,
+                    cloudmail_config.display_timezone,
+                ),
+                "target_site": mapping.target_site,
+                "tags": list(mapping.tags),
+                "tag_ids": [tag.id for tag in mapping_tags],
+                "address_kind": mapping.address_kind,
+                "parent_mapping_id": mapping.parent_mapping_id,
+                "reuse_policy": mapping.reuse_policy,
+                "first_used_at": _format_timestamp_for_display(
+                    mapping.first_used_at,
+                    cloudmail_config.display_timezone,
+                ),
+                "usage_state": usage_state,
+            }
+        )
     return _render(
         request,
         "admin_dashboard.html",

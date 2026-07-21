@@ -430,6 +430,41 @@ def test_admin_dashboard_supports_key_search_pagination_and_category_filter(tmp_
     assert "第 2 / 2 页" in page_two_response.text
 
 
+def test_admin_dashboard_distinguishes_success_platform_tag_and_never_used(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    business_tagged = store.create_mapping("business@example.com")
+    platform_tagged = store.create_mapping("platform@example.com")
+    successful = store.create_mapping("successful@example.com")
+    business_tag = store.create_tag("库存 A", kind="business")
+    platform_tag = store.create_tag("OpenAI", kind="service")
+    store.add_mapping_tag(business_tagged.id, business_tag.id, source="manual")
+    store.add_mapping_tag(platform_tagged.id, platform_tag.id, source="manual")
+    with store._connect() as connection:
+        connection.execute(
+            "UPDATE access_mappings SET first_used_at = ? WHERE id = ?",
+            ("2026-07-21 00:00:00", successful.id),
+        )
+        connection.commit()
+
+    settings = AppSettings(
+        app_secret_key="test-secret",
+        app_admin_username="admin",
+        app_admin_password="pass123",
+        database_path=str(tmp_path / "app.db"),
+    )
+    client = TestClient(
+        create_app(settings=settings, store=store, cloudmail_client=FakeCloudMailClient())
+    )
+    client.post("/admin/login", data={"username": "admin", "password": "pass123"})
+
+    response = client.get("/admin")
+
+    assert response.status_code == 200
+    assert response.text.count("完全未使用</span>") == 1
+    assert response.text.count("已有平台使用标签</span>") == 1
+    assert response.text.count("已成功接码</span>") == 1
+
+
 def test_admin_mapping_forms_use_one_compact_multi_tag_selector(tmp_path) -> None:
     store = KeyStore(tmp_path / "app.db")
     unused_tag = store.create_tag("未使用", kind="business")
