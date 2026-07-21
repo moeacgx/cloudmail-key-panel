@@ -33,7 +33,9 @@ CloudMail 若把 iCloud 裂变地址归一化成主邮箱，只有当前邮箱�
 - 外部 JSON API 可按分类领取注册邮箱、获取最新验证码和完整最新邮件
 - SQLite 持久化保存 Key -> 原始收件人邮箱 / 查询邮箱映射
 - 前台输入 Key 查看最近邮件
-- 自动提取常见数字验证码
+- 自动提取常见数字验证码及 `6NQ-Y60` 一类字母数字连字符验证码
+- 每个平台标签可配置多条验证码正则，并选择规则提取、AI 失败兜底或仅 AI
+- 可选接入 OpenAI 兼容 `chat/completions` 接口；默认关闭，AI 返回值必须能在原邮件中验证
 - Docker 部署
 
 ## 本地开发
@@ -79,12 +81,20 @@ REDEMPTION_CLAIM_MINUTES=30
 REDEMPTION_SKIP_LIMIT=3
 REDEMPTION_SKIP_COOLDOWN_MINUTES=15
 PUBLIC_RECENT_MAILBOX_LIMIT=20
+# 可选：OpenAI 兼容验证码提取，后台也可配置
+# VERIFICATION_AI_BASE_URL=https://api.openai.com/v1
+# VERIFICATION_AI_API_KEY=
+# VERIFICATION_AI_MODEL=
+VERIFICATION_AI_TIMEOUT_SECONDS=10
 ```
 
 说明：
 - `.env` 里的 CloudMail 配置现在只是“默认值 / 启动兜底值”。
 - 真正推荐的方式，是登录后台后直接在“CloudMail 配置”表单里填写地址和固定 Token。
 - 后台保存后会写入 SQLite，后续查询优先使用后台里保存的配置，不需要反复改 `.env`。
+- AI 提取默认不启用。配置接口后，还需在对应平台标签中选择“AI 兜底”或“仅 AI”。
+- 自定义验证码正则一行一条，优先读取命名捕获组 `code`，其次读取第一个捕获组；没有捕获组时使用完整匹配。
+- 启用 AI 后，只有已经通过收件人、领取时间和平台规则筛选的候选邮件会发送到所配置的接口。
 
 
 ## CloudMail API 对接

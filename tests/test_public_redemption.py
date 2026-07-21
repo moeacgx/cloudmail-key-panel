@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import httpx
 from fastapi.testclient import TestClient
 
 from app.cloudmail import CloudMailError, CloudMailMessage
@@ -176,6 +177,62 @@ def test_independent_claim_keeps_product_type_in_recent_mailbox_payload(tmp_path
 
     assert response.status_code == 201
     assert _claim_from(response.json())["delivery_mode"] == "independent"
+
+
+def test_public_redemption_can_use_global_ai_only_extraction(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    mapping = store.create_mapping("ai-only@icloud.com")
+    target_tag = store.create_tag(
+        "SpaceXAI",
+        kind="service",
+        subject_keywords="spacexai",
+    )
+    category = store.create_card_category("AI 兑换")
+    _batch, cards = store.create_card_batch(
+        name="AI only",
+        category_id=category.id,
+        target_tag_id=target_tag.id,
+        card_count=1,
+        uses_per_card=1,
+    )
+    store.save_verification_extraction_settings(
+        mode="only",
+        base_url="https://ai.example.com/v1",
+        api_key="secret-key",
+        model="extract-model",
+    )
+    cloudmail = MutableCloudMailClient()
+
+    def ai_handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": '{"code":"ZX-91QK"}'}}]},
+        )
+
+    client = TestClient(
+        create_app(
+            settings=_settings(tmp_path),
+            store=store,
+            cloudmail_client=cloudmail,
+            verification_ai_transport=httpx.MockTransport(ai_handler),
+        )
+    )
+    card = cards[0]
+    assert client.post("/api/public/redeem", json={"card_code": card.code}).status_code == 200
+    generated = client.post("/api/public/claims", json={"address_mode": "primary"})
+    claim = _claim_from(generated.json())
+    cloudmail.add_message(
+        recipient_email=mapping.recipient_email,
+        code="ZX-91QK",
+        email_id=1,
+        subject="SpaceXAI confirmation code",
+    )
+
+    polled = client.get(f"/api/public/claims/{_claim_id(claim)}/code")
+
+    assert polled.status_code == 200
+    assert polled.json()["latest_code"] == "ZX-91QK"
+    assert store.get_card_by_code(card.code).remaining_uses == 0
 
 
 def test_public_claim_skips_reserved_example_domain_inventory(tmp_path) -> None:

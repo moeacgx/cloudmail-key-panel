@@ -237,6 +237,88 @@ def test_key_store_persists_cloudmail_settings(tmp_path) -> None:
     assert loaded.display_timezone == "Asia/Shanghai"
 
 
+def test_key_store_persists_verification_ai_and_tag_extraction_rules(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    saved = store.save_verification_extraction_settings(
+        mode="fallback",
+        custom_patterns=r"token=([0-9]{4,8})" + "\n" + r"order=([A-Z0-9-]+)",
+        base_url=" https://ai.example.com/v1/ ",
+        api_key=" secret-key ",
+        model=" extract-model ",
+        timeout_seconds="8",
+    )
+    tag = store.create_tag(
+        "SpaceXAI",
+        kind="service",
+        code_patterns=r"\b(?P<code>[A-Z0-9]{3}-[A-Z0-9]{3})\b" + "\n" + r"order=(\d{8})",
+        extraction_mode="ai_fallback",
+    )
+    restarted = KeyStore(tmp_path / "app.db")
+    loaded = restarted.get_verification_extraction_settings()
+    loaded_tag = restarted.get_tag(tag.id)
+
+    assert saved.base_url == "https://ai.example.com/v1"
+    assert saved.mode == "fallback"
+    assert saved.custom_patterns == (
+        r"token=([0-9]{4,8})",
+        r"order=([A-Z0-9-]+)",
+    )
+    assert loaded.mode == "fallback"
+    assert loaded.custom_patterns == saved.custom_patterns
+    assert loaded.api_key == "secret-key"
+    assert loaded.model == "extract-model"
+    assert loaded.timeout_seconds == 8
+    assert loaded_tag is not None
+    assert loaded_tag.code_patterns == (
+        r"\b(?P<code>[A-Z0-9]{3}-[A-Z0-9]{3})\b",
+        r"order=(\d{8})",
+    )
+    assert loaded_tag.extraction_mode == "ai_fallback"
+
+
+def test_verification_ai_blank_key_is_preserved_and_can_be_cleared(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    store.save_verification_extraction_settings(
+        base_url="https://ai.example.com/v1",
+        api_key="secret-key",
+        model="extract-model",
+    )
+
+    preserved = store.save_verification_extraction_settings(
+        base_url="https://ai.example.com/v1",
+        api_key="",
+        model="extract-model-v2",
+    )
+    assert preserved.api_key == "secret-key"
+
+    cleared = store.save_verification_extraction_settings(
+        mode="fallback",
+        base_url="",
+        api_key="",
+        model="",
+        clear_api_key=True,
+    )
+    assert cleared.api_key == ""
+    assert cleared.mode == "off"
+
+
+def test_tag_rejects_invalid_extraction_rule(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+
+    with pytest.raises(ValueError, match="pattern is invalid"):
+        store.create_tag("Broken", code_patterns="(")
+
+
+def test_global_extraction_mode_requires_complete_ai_config(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+
+    with pytest.raises(ValueError, match="verification ai config is required"):
+        store.save_verification_extraction_settings(mode="only")
+
+    with pytest.raises(ValueError, match="verification extraction global mode is invalid"):
+        store.save_verification_extraction_settings(mode="sometimes")
+
+
 def test_key_store_keeps_legacy_categories_as_labels_and_initializes_status_idle(tmp_path) -> None:
     db_path = tmp_path / "legacy.db"
     with sqlite3.connect(db_path) as connection:

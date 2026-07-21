@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 
@@ -26,6 +27,12 @@ class AppSettings:
     redemption_skip_limit: int = 3
     redemption_skip_cooldown_minutes: int = 15
     public_recent_mailbox_limit: int = 20
+    verification_extraction_mode: str = "off"
+    verification_code_patterns: tuple[str, ...] = ()
+    verification_ai_base_url: str = ""
+    verification_ai_api_key: str = ""
+    verification_ai_model: str = ""
+    verification_ai_timeout_seconds: int = 10
 
     @classmethod
     def from_env(cls) -> "AppSettings":
@@ -63,4 +70,37 @@ class AppSettings:
             public_recent_mailbox_limit=int(
                 os.getenv("PUBLIC_RECENT_MAILBOX_LIMIT", str(defaults.public_recent_mailbox_limit))
             ),
+            verification_extraction_mode=os.getenv(
+                "VERIFICATION_EXTRACTION_MODE", defaults.verification_extraction_mode
+            ),
+            verification_code_patterns=_parse_pattern_list(
+                os.getenv("VERIFICATION_CODE_PATTERNS", "")
+            ),
+            verification_ai_base_url=os.getenv(
+                "VERIFICATION_AI_BASE_URL", defaults.verification_ai_base_url
+            ),
+            verification_ai_api_key=os.getenv(
+                "VERIFICATION_AI_API_KEY", defaults.verification_ai_api_key
+            ),
+            verification_ai_model=os.getenv(
+                "VERIFICATION_AI_MODEL", defaults.verification_ai_model
+            ),
+            verification_ai_timeout_seconds=int(
+                os.getenv(
+                    "VERIFICATION_AI_TIMEOUT_SECONDS",
+                    str(defaults.verification_ai_timeout_seconds),
+                )
+            ),
         )
+
+
+def _parse_pattern_list(value: str) -> tuple[str, ...]:
+    if not value.strip():
+        return ()
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError("VERIFICATION_CODE_PATTERNS must be a JSON array") from exc
+    if not isinstance(parsed, list) or any(not isinstance(item, str) for item in parsed):
+        raise ValueError("VERIFICATION_CODE_PATTERNS must be a JSON array of strings")
+    return tuple(item.strip() for item in parsed if item.strip())

@@ -6,7 +6,7 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from app.code_extractor import extract_verification_codes
 
@@ -29,6 +29,8 @@ class PlatformRule:
 
     sender_patterns: tuple[str, ...] = ()
     subject_keywords: tuple[str, ...] = ()
+    code_patterns: tuple[str, ...] = ()
+    extraction_mode: str = "rules"
 
     def matches(self, sender: str, subject: str) -> bool:
         normalized_sender = (sender or "").strip().casefold()
@@ -57,32 +59,50 @@ def build_platform_rule(
     *,
     sender_patterns: Iterable[str] = (),
     subject_keywords: Iterable[str] = (),
+    code_patterns: Iterable[str] = (),
+    extraction_mode: str = "rules",
     unrestricted: bool = False,
 ) -> PlatformRule:
     """根据后台标签规则构造平台过滤器；未知平台至少按标签名过滤主题。"""
 
     normalized_senders = tuple(str(value).strip().casefold() for value in sender_patterns if str(value).strip())
     normalized_subjects = tuple(str(value).strip().casefold() for value in subject_keywords if str(value).strip())
+    extraction_policy = {
+        "code_patterns": tuple(str(value).strip() for value in code_patterns if str(value).strip()),
+        "extraction_mode": extraction_mode,
+    }
     if unrestricted:
-        return PlatformRule()
+        return PlatformRule(**extraction_policy)
     if normalized_senders or normalized_subjects:
-        return PlatformRule(normalized_senders, normalized_subjects)
+        return PlatformRule(normalized_senders, normalized_subjects, **extraction_policy)
 
     normalized_name = (name or "").strip().casefold()
     if any(keyword in normalized_name for keyword in ("gpt", "chatgpt", "openai")):
         return PlatformRule(
             sender_patterns=("@openai.com", "*@*.openai.com"),
+            **extraction_policy,
         )
     if any(keyword in normalized_name for keyword in ("claude", "anthropic")):
         return PlatformRule(
             sender_patterns=("@claude.ai", "@anthropic.com", "*@*.anthropic.com"),
+            **extraction_policy,
         )
     if any(keyword in normalized_name for keyword in ("gemini", "谷歌")):
         return PlatformRule(
             sender_patterns=("@google.com", "*@*.google.com"),
             subject_keywords=("gemini",),
+            **extraction_policy,
         )
-    return PlatformRule(subject_keywords=(normalized_name,)) if normalized_name else PlatformRule()
+    if any(keyword in normalized_name for keyword in ("grok", "spacexai")):
+        return PlatformRule(
+            subject_keywords=("grok", "spacexai"),
+            **extraction_policy,
+        )
+    return (
+        PlatformRule(subject_keywords=(normalized_name,), **extraction_policy)
+        if normalized_name
+        else PlatformRule(**extraction_policy)
+    )
 
 
 @dataclass(slots=True, frozen=True)
@@ -179,6 +199,7 @@ def find_latest_code(
     platform_rule: PlatformRule | None = None,
     fallback_email: str = "",
     allow_recipient_fallback: bool = False,
+    code_extractor: Callable[[str, str, str, PlatformRule], list[str]] | None = None,
 ) -> CodeMatch | None:
     """返回本次领取后的最新验证码。
 
@@ -211,6 +232,7 @@ def find_latest_code(
         baseline_email_id=baseline_email_id,
         platform_rule=rule,
         matched_via_fallback=False,
+        code_extractor=code_extractor,
     )
     if exact_match is not None:
         return exact_match
@@ -229,6 +251,7 @@ def find_latest_code(
         baseline_email_id=baseline_email_id,
         platform_rule=rule,
         matched_via_fallback=True,
+        code_extractor=code_extractor,
     )
 
 
@@ -240,6 +263,7 @@ def _find_latest_code_for_recipient(
     baseline_email_id: int,
     platform_rule: PlatformRule,
     matched_via_fallback: bool,
+    code_extractor: Callable[[str, str, str, PlatformRule], list[str]] | None,
 ) -> CodeMatch | None:
     """在已经确定的收件地址上执行完整的验证码筛选。"""
 
@@ -263,11 +287,21 @@ def _find_latest_code_for_recipient(
         if not platform_rule.matches(sender, subject):
             continue
 
-        codes = extract_verification_codes(
-            subject,
-            str(getattr(message, "text", "") or ""),
-            str(getattr(message, "content", "") or ""),
-        )
+        message_text = str(getattr(message, "text", "") or "")
+        message_html = str(getattr(message, "content", "") or "")
+        if code_extractor is None:
+            codes = (
+                []
+                if platform_rule.extraction_mode == "ai_only"
+                else extract_verification_codes(
+                    subject,
+                    message_text,
+                    message_html,
+                    custom_patterns=platform_rule.code_patterns,
+                )
+            )
+        else:
+            codes = code_extractor(subject, message_text, message_html, platform_rule)
         code = next((candidate.strip() for candidate in codes if candidate.strip()), "")
         if code:
             return CodeMatch(

@@ -21,9 +21,21 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.cloudmail import CloudMailClient, CloudMailError
 from app.code_extractor import extract_verification_codes
-from app.mailbox_matching import build_platform_rule, find_latest_code, max_email_id
+from app.mailbox_matching import PlatformRule, build_platform_rule, find_latest_code, max_email_id
 from app.settings import AppSettings
-from app.store import AccessMapping, CloudMailSettingsRecord, KeyStore, MAPPING_STATUS_LABELS, TagOption
+from app.store import (
+    AccessMapping,
+    CloudMailSettingsRecord,
+    KeyStore,
+    MAPPING_STATUS_LABELS,
+    TagOption,
+    VerificationExtractionSettingsRecord,
+)
+from app.verification_extractor import (
+    OpenAICompatibleCodeExtractor,
+    VerificationCodeExtractor,
+    VerificationExtractionError,
+)
 
 _TAG_PATTERN = re.compile(r"<[^>]+>")
 _WHITESPACE_PATTERN = re.compile(r"\s+")
@@ -92,6 +104,7 @@ def create_app(
     store: KeyStore | None = None,
     cloudmail_client: Any | None = None,
     cloudmail_client_factory: Callable[[ResolvedCloudMailConfig], Any] | None = None,
+    verification_ai_transport: Any | None = None,
 ) -> FastAPI:
     resolved_settings = settings or AppSettings.from_env()
     resolved_store = store or KeyStore(resolved_settings.database_path)
@@ -107,6 +120,7 @@ def create_app(
     app.state.store = resolved_store
     app.state.fixed_cloudmail_client = cloudmail_client
     app.state.cloudmail_client_factory = cloudmail_client_factory
+    app.state.verification_ai_transport = verification_ai_transport
 
     @app.middleware("http")
     async def authenticate_external_api(request: Request, call_next: Callable[..., Any]) -> Response:
@@ -390,9 +404,10 @@ def create_app(
             return _api_error("target_tag_not_found", "当前邮箱的接码平台标签已失效", status.HTTP_409_CONFLICT)
         mailbox_payload, mailbox_status = _build_external_api_mailbox_payload(request, current)
         if mailbox_status != status.HTTP_200_OK:
+            extraction_error = mailbox_payload.get("error", {})
             return _api_error(
-                "cloudmail_error",
-                mailbox_payload.get("error", {}).get("message", "CloudMail 查询失败"),
+                extraction_error.get("code", "cloudmail_error"),
+                extraction_error.get("message", "CloudMail 查询失败"),
                 mailbox_status,
             )
         if not mailbox_payload.get("latest_code"):
@@ -976,6 +991,49 @@ def create_app(
             page=page,
         )
 
+    @app.post("/admin/verification-extraction")
+    def admin_save_verification_extraction_settings(
+        request: Request,
+        mode: str = Form("off"),
+        custom_patterns: str = Form(""),
+        base_url: str = Form(""),
+        api_key: str = Form(""),
+        model: str = Form(""),
+        timeout_seconds: str = Form("10"),
+        clear_api_key: bool = Form(False),
+        q: str = Form(""),
+        category: str = Form(""),
+        page: int = Form(1),
+    ) -> Response:
+        if not _is_admin(request):
+            return RedirectResponse(url="/admin/login", status_code=status.HTTP_303_SEE_OTHER)
+        try:
+            request.app.state.store.save_verification_extraction_settings(
+                mode=mode,
+                custom_patterns=custom_patterns,
+                base_url=base_url,
+                api_key=api_key,
+                model=model,
+                timeout_seconds=timeout_seconds,
+                clear_api_key=clear_api_key,
+            )
+        except ValueError as exc:
+            return _render_admin_dashboard(
+                request,
+                error=_translate_store_error(str(exc)),
+                status_code=status.HTTP_400_BAD_REQUEST,
+                search_query=q,
+                category_filter=category,
+                page=page,
+            )
+        return _render_admin_dashboard(
+            request,
+            message="验证码提取配置已保存",
+            search_query=q,
+            category_filter=category,
+            page=page,
+        )
+
     @app.post("/admin/keys")
     def admin_create_key(
         request: Request,
@@ -1181,6 +1239,7 @@ def create_app(
         render=_render,
         get_cloudmail_client=_get_cloudmail_client,
         get_cloudmail_settings=_get_cloudmail_settings_for_display,
+        get_verification_extractor=_get_verification_code_extractor,
     )
 
     return app
@@ -1366,15 +1425,26 @@ def _build_workbench_latest_code_payload(request: Request, mapping: AccessMappin
         }, status.HTTP_502_BAD_GATEWAY
 
     fallback_email = _alias_fallback_email(request.app.state.store, mapping)
-    matched = find_latest_code(
-        emails,
-        actual_email=mapping.recipient_email,
-        claimed_at=mapping.claimed_at,
-        baseline_email_id=mapping.last_seen_email_id,
-        platform_rule=_platform_rule_for_mapping(request, mapping),
-        fallback_email=fallback_email,
-        allow_recipient_fallback=bool(fallback_email),
-    )
+    try:
+        matched = find_latest_code(
+            emails,
+            actual_email=mapping.recipient_email,
+            claimed_at=mapping.claimed_at,
+            baseline_email_id=mapping.last_seen_email_id,
+            platform_rule=_platform_rule_for_mapping(request, mapping),
+            fallback_email=fallback_email,
+            allow_recipient_fallback=bool(fallback_email),
+            code_extractor=_get_verification_code_extractor(request),
+        )
+    except VerificationExtractionError as exc:
+        return {
+            "mapping": _serialize_workbench_mapping(request, mapping),
+            "latest_code": None,
+            "latest_email_id": None,
+            "recipient_match": None,
+            "error": str(exc),
+            "notice": None,
+        }, status.HTTP_502_BAD_GATEWAY
 
     return {
         "mapping": _serialize_workbench_mapping(request, mapping),
@@ -1449,15 +1519,27 @@ def _build_external_api_mailbox_payload(
         }, status.HTTP_502_BAD_GATEWAY
 
     fallback_email = _alias_fallback_email(request.app.state.store, mapping)
-    matched = find_latest_code(
-        emails,
-        actual_email=mapping.recipient_email,
-        claimed_at=mapping.claimed_at,
-        baseline_email_id=mapping.last_seen_email_id,
-        platform_rule=_platform_rule_for_mapping(request, mapping),
-        fallback_email=fallback_email,
-        allow_recipient_fallback=bool(fallback_email),
-    )
+    try:
+        matched = find_latest_code(
+            emails,
+            actual_email=mapping.recipient_email,
+            claimed_at=mapping.claimed_at,
+            baseline_email_id=mapping.last_seen_email_id,
+            platform_rule=_platform_rule_for_mapping(request, mapping),
+            fallback_email=fallback_email,
+            allow_recipient_fallback=bool(fallback_email),
+            code_extractor=_get_verification_code_extractor(request),
+        )
+    except VerificationExtractionError as exc:
+        return {
+            "mapping": _serialize_external_api_mapping(request, mapping),
+            "registration_email": mapping.recipient_email,
+            "latest_code": None,
+            "latest_email": None,
+            "recipient_match": None,
+            "notice": None,
+            "error": {"code": "verification_extraction_error", "message": str(exc)},
+        }, status.HTTP_502_BAD_GATEWAY
     latest_email = None
     if matched is not None:
         email = next(
@@ -1488,7 +1570,7 @@ def _build_external_api_mailbox_payload(
                 "recipient": email.recipient,
                 "content": email.content,
                 "text": email.text,
-                "codes": extract_verification_codes(email.subject, email.text, email.content),
+                "codes": [matched.code],
                 "detected_recipients": detected_recipients,
             }
 
@@ -1690,6 +1772,7 @@ def _render_admin_dashboard(
     ]
     categories = [tag.name for tag in tags]
     cloudmail_config = _get_cloudmail_settings_for_display(request)
+    verification_config = _get_verification_settings(request)
     display_mappings = [
         {
             "id": mapping.id,
@@ -1724,6 +1807,7 @@ def _render_admin_dashboard(
             "categories": categories,
             "tags": tags,
             "cloudmail_config": cloudmail_config,
+            "verification_config": verification_config,
             "error": error,
             "message": message,
             "search_query": search_query,
@@ -1751,6 +1835,64 @@ def _get_cloudmail_settings_for_display(request: Request) -> CloudMailSettingsRe
         default_recent_email_limit=settings.lookup_email_limit,
         default_display_timezone=settings.display_timezone,
     )
+
+
+def _get_verification_settings(request: Request) -> VerificationExtractionSettingsRecord:
+    settings = request.app.state.settings
+    return request.app.state.store.get_verification_extraction_settings(
+        default_mode=settings.verification_extraction_mode,
+        default_custom_patterns=settings.verification_code_patterns,
+        default_base_url=settings.verification_ai_base_url,
+        default_api_key=settings.verification_ai_api_key,
+        default_model=settings.verification_ai_model,
+        default_timeout_seconds=settings.verification_ai_timeout_seconds,
+    )
+
+
+def _get_verification_code_extractor(
+    request: Request,
+) -> Callable[[str, str, str, PlatformRule], list[str]]:
+    settings = _get_verification_settings(request)
+    ai_extractor = None
+    if settings.base_url and settings.api_key and settings.model:
+        ai_extractor = OpenAICompatibleCodeExtractor(
+            base_url=settings.base_url,
+            api_key=settings.api_key,
+            model=settings.model,
+            timeout_seconds=settings.timeout_seconds,
+            transport=getattr(request.app.state, "verification_ai_transport", None),
+        )
+    ai_attempts_remaining = 3
+
+    def extract(subject: str, text: str, html_content: str, rule: PlatformRule) -> list[str]:
+        nonlocal ai_attempts_remaining
+        if settings.mode == "only" or rule.extraction_mode == "ai_only":
+            effective_mode = "ai_only"
+        elif settings.mode == "fallback" or rule.extraction_mode == "ai_fallback":
+            effective_mode = "ai_fallback"
+        else:
+            effective_mode = "rules"
+        custom_patterns = tuple(
+            dict.fromkeys((*settings.custom_patterns, *rule.code_patterns))
+        )
+
+        if effective_mode != "ai_only":
+            rule_codes = VerificationCodeExtractor(
+                mode="rules",
+                custom_patterns=custom_patterns,
+            ).extract(subject, text, html_content)
+            if rule_codes or effective_mode == "rules":
+                return rule_codes
+        if ai_attempts_remaining <= 0:
+            raise VerificationExtractionError("单次轮询的 AI 提取次数已达上限")
+        ai_attempts_remaining -= 1
+        return VerificationCodeExtractor(
+            mode="ai_only",
+            custom_patterns=custom_patterns,
+            ai_extractor=ai_extractor,
+        ).extract(subject, text, html_content)
+
+    return extract
 
 
 def _resolve_cloudmail_config(request: Request) -> ResolvedCloudMailConfig:
@@ -1844,6 +1986,15 @@ def _translate_store_error(message: str) -> str:
         "internal_admin_credentials incomplete": "管理员邮箱和密码要么都填，要么都留空",
         "recent_email_limit must be a positive integer": "最新邮件数量必须是大于 0 的整数",
         "display_timezone is invalid": "系统时区无效，请填写正确的 IANA 时区，例如 Asia/Shanghai",
+        "verification ai base url is invalid": "AI 接口地址无效，请填写 http 或 https 地址",
+        "verification ai config is incomplete": "AI 接口地址、密钥和模型必须同时填写",
+        "verification ai config is required": "AI 兜底或仅 AI 模式必须完整配置接口地址、密钥和模型",
+        "verification ai timeout is invalid": "AI 请求超时必须是 1 到 60 秒的整数",
+        "verification extraction global mode is invalid": "全局验证码提取模式无效",
+        "verification extraction mode is invalid": "验证码提取模式无效",
+        "verification code pattern is too long": "单条验证码正则最长 500 个字符",
+        "verification code pattern is invalid": "验证码正则格式无效，请检查后重试",
+        "too many verification code patterns": "验证码正则最多配置 20 条",
         "status is invalid": "邮箱状态无效",
         "category is required": "完成后分类不能为空",
         "claimed_by is required": "工作台会话无效，请刷新后重新登录",
@@ -1912,6 +2063,8 @@ def _platform_rule_for_mapping(request: Request, mapping: AccessMapping):
         tag.name,
         sender_patterns=tag.sender_patterns,
         subject_keywords=tag.subject_keywords,
+        code_patterns=tag.code_patterns,
+        extraction_mode=tag.extraction_mode,
         unrestricted=tag.kind == "system",
     )
 

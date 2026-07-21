@@ -45,6 +45,14 @@
       <span class="text-xs font-medium text-base-content/50">系统时区</span>
       <span>{{ cloudmail_config.display_timezone }}</span>
     </div>
+    <div class="grid gap-1">
+      <span class="text-xs font-medium text-base-content/50">验证码提取模式</span>
+      <span>{% if verification_config.mode == 'fallback' %}所有平台至少 AI 兜底{% elif verification_config.mode == 'only' %}所有平台仅 AI{% else %}按平台标签设置{% endif %}</span>
+    </div>
+    <div class="grid gap-1">
+      <span class="text-xs font-medium text-base-content/50">OpenAI 兼容模型</span>
+      <span>{{ verification_config.model if verification_config.base_url and verification_config.api_key and verification_config.model else '未配置' }}</span>
+    </div>
   </div>
 
   <div class="mt-4 flex flex-wrap gap-2">
@@ -53,6 +61,7 @@
     <a class="btn btn-outline btn-sm" href="/admin/tags">邮箱标签</a>
     <a class="btn btn-outline btn-sm" href="/admin/api">API 文档与调试</a>
     <button type="button" class="btn btn-outline btn-sm" data-cloudmail-config-trigger>编辑 CloudMail 配置</button>
+    <button type="button" class="btn btn-outline btn-sm" data-verification-config-trigger>编辑验证码提取配置</button>
   </div>
   </div>
 
@@ -102,6 +111,63 @@
         <button type="button" class="btn btn-ghost" data-close-dialog>取消</button>
       </div>
     </form>
+    </div>
+  </dialog>
+
+  <dialog id="verification-config-dialog" class="modal">
+    <div class="modal-box max-w-2xl">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <h3 class="text-lg font-semibold">验证码提取配置</h3>
+          <p class="mt-1 text-sm text-base-content/60">全局设置提取顺序；自定义正则支持一行一条。</p>
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm" data-close-dialog>关闭</button>
+      </div>
+      <form method="post" action="/admin/verification-extraction" class="mt-5 grid gap-4" autocomplete="off">
+        <input type="hidden" name="q" value="{{ search_query }}">
+        <input type="hidden" name="category" value="{{ current_category }}">
+        <input type="hidden" name="page" value="{{ current_page }}">
+        <label class="grid gap-2">
+          <span class="text-sm font-medium">验证码提取模式</span>
+          <select class="select select-bordered w-full" name="mode" required>
+            <option value="off"{% if verification_config.mode == 'off' %} selected{% endif %}>按平台标签设置（默认）</option>
+            <option value="fallback"{% if verification_config.mode == 'fallback' %} selected{% endif %}>所有平台至少使用 AI 兜底</option>
+            <option value="only"{% if verification_config.mode == 'only' %} selected{% endif %}>所有平台仅使用 AI</option>
+          </select>
+        </label>
+        <label class="grid gap-2">
+          <span class="text-sm font-medium">自定义验证码正则</span>
+          <textarea class="textarea textarea-bordered min-h-32 font-mono text-xs" name="custom_patterns" placeholder="一行一条，例如：&#10;\b(?P&lt;code&gt;[A-Z0-9]{3}-[A-Z0-9]{3})\b">{{ verification_config.custom_patterns | join('\n') }}</textarea>
+          <span class="text-xs leading-5 text-base-content/45">最多 20 条；优先读取命名组 code，其次第一个捕获组，否则使用完整匹配。</span>
+        </label>
+        <label class="grid gap-2">
+          <span class="text-sm font-medium">OpenAI 兼容接口地址</span>
+          <input class="input input-bordered w-full" type="url" name="base_url" value="{{ verification_config.base_url }}" placeholder="https://api.openai.com/v1">
+        </label>
+        <label class="grid gap-2">
+          <span class="text-sm font-medium">模型</span>
+          <input class="input input-bordered w-full" type="text" name="model" value="{{ verification_config.model }}" placeholder="填写接口支持的模型名称" autocomplete="off">
+        </label>
+        <label class="grid gap-2">
+          <span class="text-sm font-medium">API Key</span>
+          <input class="input input-bordered w-full" type="password" name="api_key" value="" placeholder="{{ '已配置，留空保持不变' if verification_config.api_key else '尚未配置' }}" autocomplete="new-password">
+        </label>
+        {% if verification_config.api_key %}
+          <label class="flex cursor-pointer items-center gap-3">
+            <input class="checkbox checkbox-sm" type="checkbox" name="clear_api_key" value="true">
+            <span class="text-sm">清除密钥并停用 AI 配置</span>
+          </label>
+        {% endif %}
+        <label class="grid gap-2">
+          <span class="text-sm font-medium">请求超时（秒）</span>
+          <input class="input input-bordered w-full" type="number" name="timeout_seconds" min="1" max="60" step="1" value="{{ verification_config.timeout_seconds }}" required>
+        </label>
+        <div class="alert border border-warning/30 bg-warning/5 text-sm">启用 AI 的平台会把已通过收件人、时间和平台筛选的候选邮件内容发送到所配置的接口。</div>
+        <div class="modal-action">
+          <button type="submit" class="btn btn-primary">保存配置</button>
+          <button type="button" class="btn btn-ghost" data-close-dialog>取消</button>
+        </div>
+      </form>
     </div>
   </dialog>
 </section>
@@ -369,6 +435,7 @@
 <script>
   (() => {
     const cloudmailDialog = document.getElementById('cloudmail-config-dialog');
+    const verificationDialog = document.getElementById('verification-config-dialog');
     const mappingDialog = document.getElementById('mapping-edit-dialog');
     const exportDialog = document.getElementById('export-links-dialog');
     const mappingForm = document.getElementById('mapping-edit-form');
@@ -393,6 +460,9 @@
 
     document.querySelectorAll('[data-cloudmail-config-trigger]').forEach((button) => {
       button.addEventListener('click', () => cloudmailDialog?.showModal());
+    });
+    document.querySelectorAll('[data-verification-config-trigger]').forEach((button) => {
+      button.addEventListener('click', () => verificationDialog?.showModal());
     });
 
     if (mappingDialog && mappingForm) {

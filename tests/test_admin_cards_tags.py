@@ -79,6 +79,32 @@ def test_admin_can_create_platform_tag_card_category_batch_and_export_txt(tmp_pa
     assert "attachment" in exported.headers["content-disposition"]
 
 
+def test_admin_can_save_multiple_code_patterns_and_ai_mode_per_tag(tmp_path) -> None:
+    client, store = _admin_client(tmp_path)
+    response = client.post(
+        "/admin/tags",
+        data={
+            "name": "SpaceXAI",
+            "kind": "service",
+            "subject_keywords": "spacexai",
+            "code_patterns": r"\b(?P<code>[A-Z0-9]{3}-[A-Z0-9]{3})\b" + "\n" + r"token=(\d{8})",
+            "extraction_mode": "ai_fallback",
+        },
+        follow_redirects=True,
+    )
+    tag_id = store.get_category_id("SpaceXAI")
+    tag = store.get_tag(tag_id) if tag_id is not None else None
+
+    assert response.status_code == 200
+    assert "AI 兜底" in response.text
+    assert tag is not None
+    assert tag.code_patterns == (
+        r"\b(?P<code>[A-Z0-9]{3}-[A-Z0-9]{3})\b",
+        r"token=(\d{8})",
+    )
+    assert tag.extraction_mode == "ai_fallback"
+
+
 def test_admin_can_toggle_global_independent_account_policy_on_tag(tmp_path) -> None:
     client, store = _admin_client(tmp_path)
 

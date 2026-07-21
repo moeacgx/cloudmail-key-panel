@@ -11,6 +11,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from app.verification_extractor import (
+    VALID_EXTRACTION_MODES,
+    validate_custom_patterns,
+    validate_openai_base_url,
+)
+
 VALID_MAPPING_STATUSES = {"idle", "in_progress"}
 LEGACY_MAPPING_STATUS_ALIASES = {
     "unused": "idle",
@@ -31,6 +37,7 @@ VALID_BATCH_ADDRESS_MODES = VALID_ADDRESS_MODES | {"choice"}
 VALID_CARD_STATUSES = {"active", "disabled"}
 VALID_CLAIM_STATUSES = {"pending", "completed", "skipped", "timed_out"}
 VALID_VERIFICATION_EVENT_SOURCES = {"public_card", "admin_workbench", "external_api"}
+VALID_GLOBAL_EXTRACTION_MODES = {"off", "fallback", "only"}
 _ICLOUD_ALIAS_TAG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
 
@@ -78,6 +85,19 @@ class TagOption:
     subject_keywords: tuple[str, ...] = ()
     prevents_reuse: bool = False
     alias_use_limit: int = 0
+    code_patterns: tuple[str, ...] = ()
+    extraction_mode: str = "rules"
+
+
+@dataclass(slots=True, frozen=True)
+class VerificationExtractionSettingsRecord:
+    base_url: str
+    api_key: str
+    model: str
+    timeout_seconds: int
+    updated_at: str
+    mode: str = "off"
+    custom_patterns: tuple[str, ...] = ()
 
 
 @dataclass(slots=True, frozen=True)
@@ -501,6 +521,8 @@ class KeyStore:
         subject_keywords: str | list[str] | tuple[str, ...] = (),
         prevents_reuse: bool | None = None,
         alias_use_limit: int | None = None,
+        code_patterns: str | list[str] | tuple[str, ...] | None = None,
+        extraction_mode: str | None = None,
     ) -> TagOption:
         canonical_name = self.canonicalize_category(name)
         if not canonical_name:
@@ -514,6 +536,12 @@ class KeyStore:
         normalized_senders = self._normalize_rule_values(sender_patterns)
         normalized_subjects = self._normalize_rule_values(subject_keywords)
         normalized_alias_use_limit = self._normalize_alias_use_limit(alias_use_limit)
+        normalized_code_patterns = None if code_patterns is None else json.dumps(
+            validate_custom_patterns(self._split_rule_lines(code_patterns)), ensure_ascii=False
+        )
+        normalized_extraction_mode = (
+            None if extraction_mode is None else self._normalize_extraction_mode(extraction_mode)
+        )
 
         with self._connect() as connection:
             connection.execute(
@@ -521,7 +549,9 @@ class KeyStore:
                 UPDATE categories
                 SET color = ?, archived = 0, kind = ?, sender_patterns = ?, subject_keywords = ?,
                     prevents_reuse = CASE WHEN ? IS NULL THEN prevents_reuse ELSE ? END,
-                    alias_use_limit = CASE WHEN ? IS NULL THEN alias_use_limit ELSE ? END
+                    alias_use_limit = CASE WHEN ? IS NULL THEN alias_use_limit ELSE ? END,
+                    code_patterns = CASE WHEN ? IS NULL THEN code_patterns ELSE ? END,
+                    extraction_mode = CASE WHEN ? IS NULL THEN extraction_mode ELSE ? END
                 WHERE normalized_name = ?
                 """,
                 (
@@ -533,6 +563,10 @@ class KeyStore:
                     None if prevents_reuse is None else (1 if prevents_reuse else 0),
                     normalized_alias_use_limit,
                     normalized_alias_use_limit,
+                    normalized_code_patterns,
+                    normalized_code_patterns,
+                    normalized_extraction_mode,
+                    normalized_extraction_mode,
                     self._category_key(canonical_name),
                 ),
             )
@@ -541,6 +575,7 @@ class KeyStore:
                 SELECT categories.id, categories.name, categories.color, categories.archived,
                        categories.kind, categories.sender_patterns, categories.subject_keywords,
                        categories.prevents_reuse, categories.alias_use_limit,
+                       categories.code_patterns, categories.extraction_mode,
                        (
                            SELECT COUNT(DISTINCT COALESCE(NULLIF(tagged.parent_mapping_id, 0), tagged.id))
                            FROM mapping_tags tag_links
@@ -570,6 +605,7 @@ class KeyStore:
                 SELECT categories.id, categories.name, categories.color, categories.archived,
                        categories.kind, categories.sender_patterns, categories.subject_keywords,
                        categories.prevents_reuse, categories.alias_use_limit,
+                       categories.code_patterns, categories.extraction_mode,
                        (
                            SELECT COUNT(DISTINCT COALESCE(NULLIF(tagged.parent_mapping_id, 0), tagged.id))
                            FROM mapping_tags tag_links
@@ -595,6 +631,7 @@ class KeyStore:
                 SELECT categories.id, categories.name, categories.color, categories.archived,
                        categories.kind, categories.sender_patterns, categories.subject_keywords,
                        categories.prevents_reuse, categories.alias_use_limit,
+                       categories.code_patterns, categories.extraction_mode,
                        (
                            SELECT COUNT(DISTINCT COALESCE(NULLIF(tagged.parent_mapping_id, 0), tagged.id))
                            FROM mapping_tags tag_links
@@ -637,6 +674,8 @@ class KeyStore:
         subject_keywords: str | list[str] | tuple[str, ...] | None = None,
         prevents_reuse: bool | None = None,
         alias_use_limit: int | None = None,
+        code_patterns: str | list[str] | tuple[str, ...] | None = None,
+        extraction_mode: str | None = None,
     ) -> TagOption:
         normalized_name = unicodedata.normalize("NFKC", name or "").strip()
         normalized_key = self._category_key(normalized_name)
@@ -655,6 +694,12 @@ class KeyStore:
             self._normalize_rule_values(subject_keywords), ensure_ascii=False
         )
         normalized_alias_use_limit = self._normalize_alias_use_limit(alias_use_limit)
+        normalized_code_patterns = None if code_patterns is None else json.dumps(
+            validate_custom_patterns(self._split_rule_lines(code_patterns)), ensure_ascii=False
+        )
+        normalized_extraction_mode = (
+            None if extraction_mode is None else self._normalize_extraction_mode(extraction_mode)
+        )
 
         try:
             with self._connect() as connection:
@@ -674,7 +719,9 @@ class KeyStore:
                         sender_patterns = CASE WHEN ? IS NULL THEN sender_patterns ELSE ? END,
                         subject_keywords = CASE WHEN ? IS NULL THEN subject_keywords ELSE ? END,
                         prevents_reuse = CASE WHEN ? IS NULL THEN prevents_reuse ELSE ? END,
-                        alias_use_limit = CASE WHEN ? IS NULL THEN alias_use_limit ELSE ? END
+                        alias_use_limit = CASE WHEN ? IS NULL THEN alias_use_limit ELSE ? END,
+                        code_patterns = CASE WHEN ? IS NULL THEN code_patterns ELSE ? END,
+                        extraction_mode = CASE WHEN ? IS NULL THEN extraction_mode ELSE ? END
                     WHERE id = ?
                     """,
                     (
@@ -692,6 +739,10 @@ class KeyStore:
                         None if prevents_reuse is None else (1 if prevents_reuse else 0),
                         normalized_alias_use_limit,
                         normalized_alias_use_limit,
+                        normalized_code_patterns,
+                        normalized_code_patterns,
+                        normalized_extraction_mode,
+                        normalized_extraction_mode,
                         int(tag_id),
                     ),
                 )
@@ -841,6 +892,7 @@ class KeyStore:
                 SELECT categories.id, categories.name, categories.color, categories.archived,
                        categories.kind, categories.sender_patterns, categories.subject_keywords,
                        categories.prevents_reuse, categories.alias_use_limit,
+                       categories.code_patterns, categories.extraction_mode,
                        1 AS usage_count,
                        (
                            SELECT COUNT(*)
@@ -3045,6 +3097,126 @@ class KeyStore:
             updated_at=updated_at,
         )
 
+    def save_verification_extraction_settings(
+        self,
+        *,
+        base_url: str = "",
+        api_key: str = "",
+        model: str = "",
+        timeout_seconds: int | str = 10,
+        clear_api_key: bool = False,
+        mode: str = "off",
+        custom_patterns: str | list[str] | tuple[str, ...] = (),
+    ) -> VerificationExtractionSettingsRecord:
+        existing = self.get_verification_extraction_settings()
+        normalized_mode = "off" if clear_api_key else (mode or "off").strip().lower()
+        if normalized_mode not in VALID_GLOBAL_EXTRACTION_MODES:
+            raise ValueError("verification extraction global mode is invalid")
+        normalized_patterns = validate_custom_patterns(self._split_rule_lines(custom_patterns))
+        if clear_api_key:
+            normalized_base_url = ""
+            normalized_api_key = ""
+            normalized_model = ""
+        else:
+            normalized_base_url = validate_openai_base_url(base_url)
+            normalized_api_key = api_key.strip() or existing.api_key
+            normalized_model = model.strip()
+        try:
+            normalized_timeout = int(timeout_seconds)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("verification ai timeout is invalid") from exc
+        if not 1 <= normalized_timeout <= 60:
+            raise ValueError("verification ai timeout is invalid")
+        configured_fields = (normalized_base_url, normalized_api_key, normalized_model)
+        if any(configured_fields) and not all(configured_fields):
+            raise ValueError("verification ai config is incomplete")
+        if normalized_mode in {"fallback", "only"} and not all(configured_fields):
+            raise ValueError("verification ai config is required")
+        updated_at = self._now()
+        with self._connect() as connection:
+            connection.executemany(
+                """
+                INSERT INTO app_settings (key, value, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+                """,
+                [
+                    ("verification_ai_base_url", normalized_base_url, updated_at),
+                    ("verification_ai_api_key", normalized_api_key, updated_at),
+                    ("verification_ai_model", normalized_model, updated_at),
+                    ("verification_ai_timeout_seconds", str(normalized_timeout), updated_at),
+                    ("verification_extraction_mode", normalized_mode, updated_at),
+                    (
+                        "verification_code_patterns",
+                        json.dumps(normalized_patterns, ensure_ascii=False),
+                        updated_at,
+                    ),
+                ],
+            )
+            connection.commit()
+        return VerificationExtractionSettingsRecord(
+            base_url=normalized_base_url,
+            api_key=normalized_api_key,
+            model=normalized_model,
+            timeout_seconds=normalized_timeout,
+            updated_at=updated_at,
+            mode=normalized_mode,
+            custom_patterns=normalized_patterns,
+        )
+
+    def get_verification_extraction_settings(
+        self,
+        *,
+        default_base_url: str = "",
+        default_api_key: str = "",
+        default_model: str = "",
+        default_timeout_seconds: int = 10,
+        default_mode: str = "off",
+        default_custom_patterns: tuple[str, ...] = (),
+    ) -> VerificationExtractionSettingsRecord:
+        keys = (
+            "verification_ai_base_url",
+            "verification_ai_api_key",
+            "verification_ai_model",
+            "verification_ai_timeout_seconds",
+            "verification_extraction_mode",
+            "verification_code_patterns",
+        )
+        placeholders = ", ".join("?" for _ in keys)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"SELECT key, value, updated_at FROM app_settings WHERE key IN ({placeholders})",
+                keys,
+            ).fetchall()
+        values = {
+            "verification_ai_base_url": default_base_url,
+            "verification_ai_api_key": default_api_key,
+            "verification_ai_model": default_model,
+            "verification_ai_timeout_seconds": str(default_timeout_seconds),
+            "verification_extraction_mode": default_mode,
+            "verification_code_patterns": json.dumps(default_custom_patterns, ensure_ascii=False),
+        }
+        updated_at = ""
+        for row in rows:
+            values[str(row["key"])] = str(row["value"])
+            updated_at = max(updated_at, str(row["updated_at"]))
+        try:
+            timeout = int(values["verification_ai_timeout_seconds"])
+        except ValueError:
+            timeout = 10
+        mode = str(values["verification_extraction_mode"] or "off").strip().lower()
+        if mode not in VALID_GLOBAL_EXTRACTION_MODES:
+            mode = "off"
+        return VerificationExtractionSettingsRecord(
+            base_url=values["verification_ai_base_url"],
+            api_key=values["verification_ai_api_key"],
+            model=values["verification_ai_model"],
+            timeout_seconds=max(1, min(timeout, 60)),
+            updated_at=updated_at,
+            mode=mode,
+            custom_patterns=self._decode_rule_values(values["verification_code_patterns"]),
+        )
+
     def _attach_mapping_tags(self, mapping: AccessMapping | None) -> AccessMapping | None:
         if mapping is None:
             return None
@@ -3101,6 +3273,14 @@ class KeyStore:
             alias_use_limit=max(0, int(row["alias_use_limit"] or 0))
             if "alias_use_limit" in keys
             else 0,
+            code_patterns=KeyStore._decode_rule_values(
+                row["code_patterns"] if "code_patterns" in keys else ""
+            ),
+            extraction_mode=(
+                str(row["extraction_mode"] or "rules")
+                if "extraction_mode" in keys and str(row["extraction_mode"] or "rules") in VALID_EXTRACTION_MODES
+                else "rules"
+            ),
         )
 
     @staticmethod
@@ -3262,6 +3442,18 @@ class KeyStore:
                 raise ValueError("invalid expiry timezone") from exc
         parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
         return parsed.strftime("%Y-%m-%d %H:%M:%S")
+
+    @staticmethod
+    def _split_rule_lines(values: str | list[str] | tuple[str, ...]) -> tuple[str, ...]:
+        candidates = values.splitlines() if isinstance(values, str) else list(values)
+        return tuple(str(value).strip() for value in candidates if str(value).strip())
+
+    @staticmethod
+    def _normalize_extraction_mode(value: str) -> str:
+        normalized = (value or "rules").strip().lower()
+        if normalized not in VALID_EXTRACTION_MODES:
+            raise ValueError("verification extraction mode is invalid")
+        return normalized
 
     @staticmethod
     def _normalize_rule_values(
@@ -3632,7 +3824,9 @@ class KeyStore:
                     sender_patterns TEXT NOT NULL DEFAULT '[]',
                     subject_keywords TEXT NOT NULL DEFAULT '[]',
                     prevents_reuse INTEGER NOT NULL DEFAULT 0,
-                    alias_use_limit INTEGER NOT NULL DEFAULT 0
+                    alias_use_limit INTEGER NOT NULL DEFAULT 0,
+                    code_patterns TEXT NOT NULL DEFAULT '[]',
+                    extraction_mode TEXT NOT NULL DEFAULT 'rules'
                 )
                 """
             )
@@ -3733,6 +3927,14 @@ class KeyStore:
             if "alias_use_limit" not in category_columns:
                 connection.execute(
                     "ALTER TABLE categories ADD COLUMN alias_use_limit INTEGER NOT NULL DEFAULT 0"
+                )
+            if "code_patterns" not in category_columns:
+                connection.execute(
+                    "ALTER TABLE categories ADD COLUMN code_patterns TEXT NOT NULL DEFAULT '[]'"
+                )
+            if "extraction_mode" not in category_columns:
+                connection.execute(
+                    "ALTER TABLE categories ADD COLUMN extraction_mode TEXT NOT NULL DEFAULT 'rules'"
                 )
             connection.execute(
                 "UPDATE access_mappings SET query_email = recipient_email WHERE query_email = '' OR query_email IS NULL"

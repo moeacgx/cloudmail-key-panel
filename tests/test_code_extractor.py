@@ -19,3 +19,19 @@ def test_extract_verification_codes_reads_codes_from_html_when_text_missing() ->
     )
 
     assert codes == ["445566"]
+
+
+def test_extract_verification_codes_reads_spacexai_alphanumeric_code() -> None:
+    codes = extract_verification_codes(
+        subject="Verify your SpaceXAI account",
+        text="Your confirmation code is 6NQ-Y60. This code expires in 10 minutes.",
+        html="<p>SpaceXAI verification code</p><strong>6nq-y60</strong>",
+    )
+
+    assert codes == ["6NQ-Y60"]
+
+
+def test_extract_verification_codes_keeps_generic_codes_in_source_order() -> None:
+    codes = extract_verification_codes(text="6NQ-Y60 appeared before 445566 and 6nq-y60.")
+
+    assert codes == ["6NQ-Y60", "445566"]

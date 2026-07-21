@@ -78,6 +78,19 @@
           <span class="text-sm font-medium">主题关键词（可选）</span>
           <textarea class="textarea textarea-bordered min-h-24" name="subject_keywords" placeholder="一行一个，例如：&#10;ChatGPT&#10;verification code"></textarea>
         </label>
+        <label class="grid gap-2">
+          <span class="text-sm font-medium">验证码提取方式</span>
+          <select class="select select-bordered" name="extraction_mode">
+            <option value="rules">规则提取</option>
+            <option value="ai_fallback">规则失败后 AI 兜底</option>
+            <option value="ai_only">仅使用 AI</option>
+          </select>
+        </label>
+        <label class="grid gap-2">
+          <span class="text-sm font-medium">自定义验证码正则（可选）</span>
+          <textarea class="textarea textarea-bordered min-h-28 font-mono text-xs" name="code_patterns" placeholder="一行一条，例如：&#10;\b(?P&lt;code&gt;[A-Z0-9]{3}-[A-Z0-9]{3})\b"></textarea>
+          <span class="text-xs leading-5 text-base-content/45">优先使用名为 code 的捕获组，其次使用第一个捕获组；没有捕获组时返回完整匹配。最多 20 条。</span>
+        </label>
         <button class="btn btn-primary" type="submit">创建标签</button>
       </form>
     </div>
@@ -105,6 +118,9 @@
                   <span class="badge badge-sm border-0 text-white" style="background-color:{{ tag.color or '#6366f1' }}">{{ tag.name }}</span>
                   <span class="badge badge-ghost badge-sm">{{ '平台标签' if tag.kind | default('service') == 'service' else '业务标签' }}</span>
                   {% if tag.kind | default('service') == 'service' %}<span class="badge badge-outline badge-sm">{{ '内置接码规则' if tag.uses_inferred_rule else '自定义接码规则' }}</span>{% endif %}
+                  {% if tag.extraction_mode == 'ai_fallback' %}<span class="badge badge-info badge-outline badge-sm">AI 兜底</span>{% endif %}
+                  {% if tag.extraction_mode == 'ai_only' %}<span class="badge badge-warning badge-outline badge-sm">仅 AI</span>{% endif %}
+                  {% if tag.code_patterns %}<span class="badge badge-outline badge-sm">{{ tag.code_patterns.split('\n') | length }} 条提取规则</span>{% endif %}
                   {% if tag.prevents_reuse %}<span class="badge badge-outline badge-sm">独立账号</span>{% endif %}
                   {% if tag.alias_use_limit %}<span class="badge badge-outline badge-sm">裂变上限 {{ tag.alias_use_limit }} 次/邮箱</span>{% endif %}
                   {% if tag.archived %}<span class="badge badge-outline badge-sm">已归档</span>{% endif %}
@@ -121,6 +137,8 @@
                     data-kind="{{ tag.kind | default('service') }}"
                     data-sender-patterns="{{ tag.sender_patterns | default('') }}"
                     data-subject-keywords="{{ tag.subject_keywords | default('') }}"
+                    data-code-patterns="{{ tag.code_patterns | default('') }}"
+                    data-extraction-mode="{{ tag.extraction_mode | default('rules') }}"
                     data-prevents-reuse="{{ 'true' if tag.prevents_reuse else 'false' }}"
                     data-alias-use-limit="{{ tag.alias_use_limit | default(0) }}"
                     data-effective-rule-summary="{{ tag.effective_rule_summary }}"
@@ -165,6 +183,8 @@
       <div class="rounded-box border border-info/25 bg-info/5 px-3 py-2 text-xs leading-5 text-base-content/65" data-edit-tag-effective-rule></div>
       <label class="grid gap-2"><span class="text-sm font-medium">发件人规则</span><textarea class="textarea textarea-bordered min-h-24" name="sender_patterns" data-edit-tag-senders></textarea><span class="text-xs leading-5 text-base-content/45">留空时按标签名称启用内置规则；填写后覆盖内置规则，并兼容 CloudMail 改写的 iCloud 发件人。</span></label>
       <label class="grid gap-2"><span class="text-sm font-medium">主题关键词</span><textarea class="textarea textarea-bordered min-h-24" name="subject_keywords" data-edit-tag-subjects></textarea></label>
+      <label class="grid gap-2"><span class="text-sm font-medium">验证码提取方式</span><select class="select select-bordered" name="extraction_mode" data-edit-tag-extraction-mode><option value="rules">规则提取</option><option value="ai_fallback">规则失败后 AI 兜底</option><option value="ai_only">仅使用 AI</option></select></label>
+      <label class="grid gap-2"><span class="text-sm font-medium">自定义验证码正则</span><textarea class="textarea textarea-bordered min-h-28 font-mono text-xs" name="code_patterns" data-edit-tag-code-patterns></textarea><span class="text-xs leading-5 text-base-content/45">一行一条；优先读取命名组 code，其次第一个捕获组，否则使用完整匹配。</span></label>
       <div class="modal-action"><button type="submit" class="btn btn-primary">保存修改</button><button type="button" class="btn btn-ghost" data-close-tag-dialog>取消</button></div>
     </form>
   </div>
@@ -194,6 +214,8 @@
       form.querySelector('[data-edit-tag-color]').value = button.dataset.color || '#6366f1';
       form.querySelector('[data-edit-tag-senders]').value = button.dataset.senderPatterns || '';
       form.querySelector('[data-edit-tag-subjects]').value = button.dataset.subjectKeywords || '';
+      form.querySelector('[data-edit-tag-code-patterns]').value = button.dataset.codePatterns || '';
+      form.querySelector('[data-edit-tag-extraction-mode]').value = button.dataset.extractionMode || 'rules';
       form.querySelector('[data-edit-tag-prevents-reuse]').checked = button.dataset.preventsReuse === 'true';
       form.querySelector('[data-edit-tag-alias-use-limit]').value = button.dataset.aliasUseLimit || '0';
       form.querySelector('[data-edit-tag-effective-rule]').textContent = button.dataset.effectiveRuleSummary || '';

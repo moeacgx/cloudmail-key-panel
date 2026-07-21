@@ -351,6 +351,12 @@ def test_inferred_platform_rules_reject_other_services() -> None:
     assert not rule.matches("mail@anthropic.com", "Claude verification code")
 
 
+def test_inferred_grok_rule_accepts_spacexai_subject() -> None:
+    rule = build_platform_rule("Grok")
+
+    assert rule.matches("forwarder@icloud.com", "SpaceXAI confirmation code: 6NQ-Y60")
+
+
 def test_inferred_platform_rule_accepts_icloud_rewritten_openai_sender() -> None:
     """iCloud 转发后的随机信封地址仍应识别出原始 OpenAI 域名。"""
 
@@ -401,3 +407,34 @@ def test_code_match_accepts_actual_icloud_rewritten_sender_from_cloudmail() -> N
     assert matched is not None
     assert matched.code == "183830"
     assert matched.email_id == 88
+
+
+def test_ai_extractor_only_receives_messages_after_all_safety_filters() -> None:
+    target = "buyer@icloud.com"
+    messages = [
+        _message(3, "other@icloud.com", "BAD-001", subject="SpaceXAI confirmation code"),
+        _message(2, target, "BAD-002", subject="Unrelated service"),
+        _message(1, target, "ZX-91QK", subject="SpaceXAI confirmation code"),
+    ]
+    seen: list[str] = []
+
+    def ai_extractor(subject: str, text: str, _html: str, rule: PlatformRule) -> list[str]:
+        seen.append(subject)
+        assert rule.extraction_mode == "ai_only"
+        assert "ZX-91QK" in text
+        return ["ZX-91QK"]
+
+    matched = find_latest_code(
+        messages,
+        actual_email=target,
+        claimed_at="2026-07-18 10:00:00",
+        platform_rule=PlatformRule(
+            subject_keywords=("spacexai",),
+            extraction_mode="ai_only",
+        ),
+        code_extractor=ai_extractor,
+    )
+
+    assert matched is not None
+    assert matched.code == "ZX-91QK"
+    assert seen == ["SpaceXAI confirmation code ZX-91QK"]

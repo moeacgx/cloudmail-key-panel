@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from app.cloudmail import CloudMailError
 from app.mailbox_matching import CodeMatch, PlatformRule, build_platform_rule, find_latest_code, max_email_id
 from app.store import CardBatch, KeyStore, RedemptionCard, RegistrationClaim, TagOption
+from app.verification_extractor import VerificationExtractionError
 
 
 class PublicRedeemRequest(BaseModel):
@@ -27,6 +28,7 @@ def register_registration_routes(
     render: Callable[[Request, str, dict[str, Any], int], HTMLResponse],
     get_cloudmail_client: Callable[[Request], Any],
     get_cloudmail_settings: Callable[[Request], Any],
+    get_verification_extractor: Callable[[Request], Any],
 ) -> None:
     """挂载兑换卡公开注册台及其后台管理路由。"""
 
@@ -98,7 +100,7 @@ def register_registration_routes(
                     get_cloudmail_client=get_cloudmail_client,
                     get_cloudmail_settings=get_cloudmail_settings,
                 )
-            except CloudMailError as exc:
+            except (CloudMailError, VerificationExtractionError) as exc:
                 refreshed_card = store.get_redemption_card(card.id) or card
                 return _public_error(
                     f"邮件服务暂时不可用，邮箱尚未交付，请稍后重试：{exc}",
@@ -138,8 +140,9 @@ def register_registration_routes(
                     claim,
                     get_cloudmail_client=get_cloudmail_client,
                     get_cloudmail_settings=get_cloudmail_settings,
+                    get_verification_extractor=get_verification_extractor,
                 )
-            except CloudMailError as exc:
+            except (CloudMailError, VerificationExtractionError) as exc:
                 return _public_error(f"邮件查询暂时失败：{exc}", status.HTTP_502_BAD_GATEWAY)
 
         if matched is not None and claim.status == "pending":
@@ -213,8 +216,9 @@ def register_registration_routes(
                     claim,
                     get_cloudmail_client=get_cloudmail_client,
                     get_cloudmail_settings=get_cloudmail_settings,
+                    get_verification_extractor=get_verification_extractor,
                 )
-            except CloudMailError as exc:
+            except (CloudMailError, VerificationExtractionError) as exc:
                 return _public_error(
                     f"为避免漏记已到达的验证码，邮件查询恢复后才能跳过：{exc}",
                     status.HTTP_502_BAD_GATEWAY,
@@ -505,6 +509,8 @@ def register_registration_routes(
                 "success_count": getattr(tag, "success_count", 0),
                 "sender_patterns": "\n".join(tag.sender_patterns),
                 "subject_keywords": "\n".join(tag.subject_keywords),
+                "code_patterns": "\n".join(tag.code_patterns),
+                "extraction_mode": tag.extraction_mode,
                 "prevents_reuse": tag.prevents_reuse,
                 "alias_use_limit": tag.alias_use_limit,
                 "uses_inferred_rule": uses_inferred_rule,
@@ -526,6 +532,8 @@ def register_registration_routes(
         kind: str = Form("service"),
         sender_patterns: str = Form(""),
         subject_keywords: str = Form(""),
+        code_patterns: str = Form(""),
+        extraction_mode: str = Form("rules"),
         prevents_reuse: bool = Form(False),
         alias_use_limit: str = Form("0"),
     ) -> Response:
@@ -539,6 +547,8 @@ def register_registration_routes(
                 kind=kind,
                 sender_patterns=sender_patterns,
                 subject_keywords=subject_keywords,
+                code_patterns=code_patterns,
+                extraction_mode=extraction_mode,
                 prevents_reuse=prevents_reuse,
                 alias_use_limit=normalized_alias_use_limit,
             )
@@ -555,6 +565,8 @@ def register_registration_routes(
         kind: str = Form("service"),
         sender_patterns: str | None = Form(None),
         subject_keywords: str | None = Form(None),
+        code_patterns: str | None = Form(None),
+        extraction_mode: str | None = Form(None),
         prevents_reuse: bool = Form(False),
         alias_use_limit: str = Form("0"),
     ) -> Response:
@@ -569,6 +581,8 @@ def register_registration_routes(
                 kind=kind,
                 sender_patterns=sender_patterns,
                 subject_keywords=subject_keywords,
+                code_patterns=code_patterns,
+                extraction_mode=extraction_mode,
                 prevents_reuse=prevents_reuse,
                 alias_use_limit=normalized_alias_use_limit,
             )
@@ -637,6 +651,7 @@ def _find_claim_code(
     *,
     get_cloudmail_client: Callable[[Request], Any],
     get_cloudmail_settings: Callable[[Request], Any],
+    get_verification_extractor: Callable[[Request], Any],
 ) -> CodeMatch | None:
     settings = get_cloudmail_settings(request)
     messages = get_cloudmail_client(request).fetch_recent_emails(
@@ -657,6 +672,7 @@ def _find_claim_code(
         platform_rule=_platform_rule(tag),
         fallback_email=fallback_email,
         allow_recipient_fallback=bool(fallback_email),
+        code_extractor=get_verification_extractor(request),
     )
 
 
@@ -685,6 +701,8 @@ def _platform_rule(tag: TagOption | None) -> PlatformRule:
         tag.name,
         sender_patterns=tag.sender_patterns,
         subject_keywords=tag.subject_keywords,
+        code_patterns=tag.code_patterns,
+        extraction_mode=tag.extraction_mode,
     )
 
 

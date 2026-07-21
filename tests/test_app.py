@@ -205,6 +205,59 @@ def test_admin_can_save_cloudmail_settings_and_lookup_uses_saved_token(tmp_path)
     assert fake_factory.configs[-1].internal_admin_password == "secret"
 
 
+def test_admin_can_save_ai_extraction_config_without_rendering_api_key(tmp_path) -> None:
+    settings = AppSettings(
+        app_secret_key="test-secret",
+        app_admin_username="admin",
+        app_admin_password="pass123",
+        database_path=str(tmp_path / "app.db"),
+    )
+    store = KeyStore(tmp_path / "app.db")
+    client = TestClient(create_app(settings=settings, store=store))
+    client.post("/admin/login", data={"username": "admin", "password": "pass123"})
+
+    response = client.post(
+        "/admin/verification-extraction",
+        data={
+            "mode": "fallback",
+            "custom_patterns": "token=([0-9]{4,8})\norder=([A-Z0-9-]+)",
+            "base_url": "https://ai.example.com/v1",
+            "api_key": "do-not-render-this-key",
+            "model": "extract-model",
+            "timeout_seconds": "7",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert "验证码提取配置已保存" in response.text
+    assert "extract-model" in response.text
+    assert 'option value="fallback" selected' in response.text
+    assert "token=([0-9]{4,8})" in response.text
+    assert "do-not-render-this-key" not in response.text
+    saved = store.get_verification_extraction_settings()
+    assert saved.api_key == "do-not-render-this-key"
+    assert saved.timeout_seconds == 7
+    assert saved.mode == "fallback"
+    assert saved.custom_patterns == (
+        "token=([0-9]{4,8})",
+        "order=([A-Z0-9-]+)",
+    )
+
+    client.post(
+        "/admin/verification-extraction",
+        data={
+            "mode": "fallback",
+            "custom_patterns": "token=([0-9]{4,8})\norder=([A-Z0-9-]+)",
+            "base_url": "https://ai.example.com/v1",
+            "api_key": "",
+            "model": "extract-model-v2",
+            "timeout_seconds": "9",
+        },
+    )
+    assert store.get_verification_extraction_settings().api_key == "do-not-render-this-key"
+
+
 def test_public_pages_do_not_show_top_nav_buttons(tmp_path) -> None:
     fake_cloudmail = FakeCloudMailClient()
     settings = AppSettings(
