@@ -115,58 +115,65 @@
   </dialog>
 
   <dialog id="verification-config-dialog" class="modal">
-    <div class="modal-box max-w-2xl">
-      <div class="flex items-start justify-between gap-4">
+    <div class="modal-box flex max-h-[min(40rem,calc(100dvh-1rem))] max-w-4xl flex-col overflow-hidden">
+      <div class="flex shrink-0 items-start justify-between gap-4">
         <div>
           <h3 class="text-lg font-semibold">验证码提取配置</h3>
           <p class="mt-1 text-sm text-base-content/60">全局设置提取顺序；自定义正则支持一行一条。</p>
         </div>
         <button type="button" class="btn btn-ghost btn-sm" data-close-dialog>关闭</button>
       </div>
-      <form method="post" action="/admin/verification-extraction" class="mt-5 grid gap-4" autocomplete="off" data-verification-config-form>
-        <input type="hidden" name="q" value="{{ search_query }}">
-        <input type="hidden" name="category" value="{{ current_category }}">
-        <input type="hidden" name="page" value="{{ current_page }}">
-        <label class="grid gap-2">
-          <span class="text-sm font-medium">验证码提取模式</span>
-          <select class="select select-bordered w-full" name="mode" required>
-            <option value="off"{% if verification_config.mode == 'off' %} selected{% endif %}>按平台标签设置（默认）</option>
-            <option value="fallback"{% if verification_config.mode == 'fallback' %} selected{% endif %}>所有平台至少使用 AI 兜底</option>
-            <option value="only"{% if verification_config.mode == 'only' %} selected{% endif %}>所有平台仅使用 AI</option>
-          </select>
-        </label>
+      <form method="post" action="/admin/verification-extraction" class="mt-4 flex min-h-0 flex-1 flex-col" autocomplete="off" data-verification-config-form>
+        <div class="grid min-h-0 gap-3 overflow-y-auto pr-1" data-verification-config-scroll>
+          <input type="hidden" name="q" value="{{ search_query }}">
+          <input type="hidden" name="category" value="{{ current_category }}">
+          <input type="hidden" name="page" value="{{ current_page }}">
+        <div class="grid gap-3 sm:grid-cols-2">
+          <label class="grid gap-2">
+            <span class="text-sm font-medium">验证码提取模式</span>
+            <select class="select select-bordered w-full" name="mode" required>
+              <option value="off"{% if verification_config.mode == 'off' %} selected{% endif %}>按平台标签设置（默认）</option>
+              <option value="fallback"{% if verification_config.mode == 'fallback' %} selected{% endif %}>所有平台至少使用 AI 兜底</option>
+              <option value="only"{% if verification_config.mode == 'only' %} selected{% endif %}>所有平台仅使用 AI</option>
+            </select>
+          </label>
+          <label class="grid gap-2">
+            <span class="text-sm font-medium">请求超时（秒）</span>
+            <input class="input input-bordered w-full" type="number" name="timeout_seconds" min="1" max="60" step="1" value="{{ verification_config.timeout_seconds }}" required>
+          </label>
+        </div>
         {% set rule_builder_title = '验证码提取规则' %}
         {% set rule_builder_name = 'custom_patterns' %}
         {% set rule_builder_value = verification_config.custom_patterns | join('\n') %}
         {% set rule_builder_edit_selector = false %}
         {% include '_verification_rule_builder.html' %}
-        <label class="grid gap-2">
-          <span class="text-sm font-medium">OpenAI 兼容接口地址</span>
-          <input class="input input-bordered w-full" type="url" name="base_url" value="{{ verification_config.base_url }}" placeholder="https://api.openai.com/v1">
-          <span class="text-xs leading-5 text-base-content/45">通常填写到 <code>/v1</code>，系统会自动追加 <code>/chat/completions</code>；也可直接填写完整接口地址。</span>
-        </label>
-        <label class="grid gap-2">
-          <span class="text-sm font-medium">模型</span>
-          <input class="input input-bordered w-full" type="text" name="model" value="{{ verification_config.model }}" placeholder="填写接口支持的模型名称" autocomplete="off">
-        </label>
-        <label class="grid gap-2">
-          <span class="text-sm font-medium">API Key</span>
-          <input class="input input-bordered w-full" type="password" name="api_key" value="" placeholder="{{ '已配置；接口域名不变时可留空' if verification_config.api_key else '尚未配置' }}" autocomplete="new-password">
-          <span class="text-xs leading-5 text-base-content/45">只修改同一域名下的路径可复用密钥；更换接口域名时必须重新填写对应的 API Key。</span>
-        </label>
-        {% if verification_config.api_key %}
-          <label class="flex cursor-pointer items-center gap-3">
-            <input class="checkbox checkbox-sm" type="checkbox" name="clear_api_key" value="true">
-            <span class="text-sm">清除密钥并停用 AI 配置</span>
+        <fieldset class="grid gap-3 rounded-box border border-base-300 p-4 sm:grid-cols-2">
+          <legend class="px-1 text-sm font-semibold">AI 兜底接口</legend>
+          <label class="grid gap-2 sm:col-span-2">
+            <span class="text-sm font-medium">OpenAI 兼容接口地址</span>
+            <input class="input input-bordered w-full" type="url" name="base_url" value="{{ verification_config.base_url }}" placeholder="https://api.openai.com/v1">
+            <span class="text-xs leading-5 text-base-content/45">通常填写到 <code>/v1</code>，系统会自动追加 <code>/chat/completions</code>；也可直接填写完整接口地址。</span>
           </label>
-        {% endif %}
-        <label class="grid gap-2">
-          <span class="text-sm font-medium">请求超时（秒）</span>
-          <input class="input input-bordered w-full" type="number" name="timeout_seconds" min="1" max="60" step="1" value="{{ verification_config.timeout_seconds }}" required>
-        </label>
-        <div class="alert border border-warning/30 bg-warning/5 text-sm">启用 AI 的平台会把已通过收件人、时间和平台筛选的候选邮件内容发送到所配置的接口。</div>
-        <div class="alert hidden text-sm" role="status" aria-live="polite" data-verification-test-result></div>
-        <div class="modal-action">
+          <label class="grid gap-2">
+            <span class="text-sm font-medium">模型</span>
+            <input class="input input-bordered w-full" type="text" name="model" value="{{ verification_config.model }}" placeholder="填写接口支持的模型名称" autocomplete="off">
+          </label>
+          <label class="grid gap-2">
+            <span class="text-sm font-medium">API Key</span>
+            <input class="input input-bordered w-full" type="password" name="api_key" value="" placeholder="{{ '已配置；接口域名不变时可留空' if verification_config.api_key else '尚未配置' }}" autocomplete="new-password">
+          </label>
+          <p class="text-xs leading-5 text-base-content/45 sm:col-span-2">只修改同一域名下的路径可复用密钥；更换接口域名时必须重新填写对应的 API Key。</p>
+          {% if verification_config.api_key %}
+            <label class="flex cursor-pointer items-center gap-3 sm:col-span-2">
+              <input class="checkbox checkbox-sm" type="checkbox" name="clear_api_key" value="true">
+              <span class="text-sm">清除密钥并停用 AI 配置</span>
+            </label>
+          {% endif %}
+          <div class="alert border border-warning/30 bg-warning/5 px-3 py-2 text-sm leading-5 sm:col-span-2">启用 AI 的平台会把已通过收件人、时间和平台筛选的候选邮件内容发送到所配置的接口。</div>
+        </fieldset>
+          <div class="alert hidden text-sm" role="status" aria-live="polite" data-verification-test-result></div>
+        </div>
+        <div class="modal-action mt-3 shrink-0 border-t border-base-300 pt-3">
           <button type="button" class="btn btn-outline" data-verification-test>测试接口</button>
           <button type="submit" class="btn btn-primary">保存配置</button>
           <button type="button" class="btn btn-ghost" data-close-dialog>取消</button>

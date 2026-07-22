@@ -235,8 +235,11 @@ def test_admin_can_save_ai_extraction_config_without_rendering_api_key(tmp_path)
     assert 'option value="fallback" selected' in response.text
     assert "data-verification-test" in response.text
     assert 'data-rule-preset="digits6"' in response.text
+    assert "自定义组合规则" in response.text
     assert "点击变量，按验证码出现顺序拼接" in response.text
     assert "高级：直接编辑正则" in response.text
+    assert "AI 兜底接口" in response.text
+    assert "max-w-4xl" in response.text
     assert "token=([0-9]{4,8})" in response.text
     assert "do-not-render-this-key" not in response.text
     saved = store.get_verification_extraction_settings()

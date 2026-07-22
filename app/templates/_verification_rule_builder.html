@@ -17,40 +17,45 @@
     </div>
   </div>
 
-  <div class="grid gap-3 rounded-box border border-base-content/10 bg-base-100 p-3">
-    <div class="flex flex-wrap items-end gap-2">
-      <label class="grid gap-1">
-        <span class="text-xs font-medium text-base-content/65">变量长度</span>
-        <select class="select select-bordered select-sm" data-rule-length>
-          {% for length in range(1, 13) %}
-            <option value="{{ length }}"{% if length == 3 %} selected{% endif %}>{{ length }} 位</option>
-          {% endfor %}
-        </select>
-      </label>
-      <div class="grid flex-1 gap-1">
-        <span class="text-xs font-medium text-base-content/65">点击变量，按验证码出现顺序拼接</span>
-        <div class="flex flex-wrap gap-1.5">
-          <button type="button" class="btn btn-ghost btn-xs border border-base-300" data-rule-token="digits">数字</button>
-          <button type="button" class="btn btn-ghost btn-xs border border-base-300" data-rule-token="letters">英文字母</button>
-          <button type="button" class="btn btn-ghost btn-xs border border-base-300" data-rule-token="alnum">字母数字混合</button>
-          <button type="button" class="btn btn-ghost btn-xs border border-base-300" data-rule-literal="-">连字符 -</button>
-          <button type="button" class="btn btn-ghost btn-xs border border-base-300" data-rule-literal="_">下划线 _</button>
-          <button type="button" class="btn btn-ghost btn-xs border border-base-300" data-rule-literal="/">斜杠 /</button>
+  <details class="collapse collapse-arrow border border-base-300 bg-base-100">
+    <summary class="collapse-title min-h-0 px-4 py-3 text-sm font-medium">自定义组合规则</summary>
+    <div class="collapse-content px-4 pb-4">
+      <div class="grid gap-3">
+        <div class="flex flex-wrap items-end gap-2">
+          <label class="grid gap-1">
+            <span class="text-xs font-medium text-base-content/65">变量长度</span>
+            <select class="select select-bordered select-sm" data-rule-length>
+              {% for length in range(1, 13) %}
+                <option value="{{ length }}"{% if length == 3 %} selected{% endif %}>{{ length }} 位</option>
+              {% endfor %}
+            </select>
+          </label>
+          <div class="grid flex-1 gap-1">
+            <span class="text-xs font-medium text-base-content/65">点击变量，按验证码出现顺序拼接</span>
+            <div class="flex flex-wrap gap-1.5">
+              <button type="button" class="btn btn-ghost btn-xs border border-base-300" data-rule-token="digits">数字</button>
+              <button type="button" class="btn btn-ghost btn-xs border border-base-300" data-rule-token="letters">英文字母</button>
+              <button type="button" class="btn btn-ghost btn-xs border border-base-300" data-rule-token="alnum">字母数字混合</button>
+              <button type="button" class="btn btn-ghost btn-xs border border-base-300" data-rule-literal="-">连字符 -</button>
+              <button type="button" class="btn btn-ghost btn-xs border border-base-300" data-rule-literal="_">下划线 _</button>
+              <button type="button" class="btn btn-ghost btn-xs border border-base-300" data-rule-literal="/">斜杠 /</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="min-h-10 rounded-box border border-dashed border-base-300 px-3 py-2" data-rule-composer>
+          <span class="text-xs text-base-content/40" data-rule-composer-empty>尚未添加变量，例如依次点击“字母数字、连字符、字母数字”。</span>
+          <div class="flex flex-wrap items-center gap-1.5" data-rule-composer-parts></div>
+        </div>
+        <p class="text-xs text-base-content/55" data-rule-human-preview>结构预览：尚未组成规则</p>
+        <div class="flex flex-wrap gap-2">
+          <button type="button" class="btn btn-primary btn-sm" data-rule-add-composed disabled>添加这条规则</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-rule-undo disabled>撤销一步</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-rule-clear-composer disabled>清空结构</button>
         </div>
       </div>
     </div>
-
-    <div class="min-h-10 rounded-box border border-dashed border-base-300 px-3 py-2" data-rule-composer>
-      <span class="text-xs text-base-content/40" data-rule-composer-empty>尚未添加变量，例如依次点击“字母数字、连字符、字母数字”。</span>
-      <div class="flex flex-wrap items-center gap-1.5" data-rule-composer-parts></div>
-    </div>
-    <p class="text-xs text-base-content/55" data-rule-human-preview>结构预览：尚未组成规则</p>
-    <div class="flex flex-wrap gap-2">
-      <button type="button" class="btn btn-primary btn-sm" data-rule-add-composed disabled>添加这条规则</button>
-      <button type="button" class="btn btn-ghost btn-sm" data-rule-undo disabled>撤销一步</button>
-      <button type="button" class="btn btn-ghost btn-sm" data-rule-clear-composer disabled>清空结构</button>
-    </div>
-  </div>
+  </details>
 
   <div class="grid gap-2">
     <div class="flex items-center justify-between gap-3">
