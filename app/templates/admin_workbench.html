@@ -52,7 +52,7 @@
       <span><strong class="block text-sm">禁止进入可复用邮箱池</strong><span class="mt-1 block text-xs text-base-content/50">成功接码后锁定整个邮箱族；如果邮箱已有使用历史，则记为“停止复用”，不会标记为隐私独立邮箱。</span></span>
     </label>
     <div class="flex flex-wrap gap-2 lg:col-span-4">
-      <button type="button" class="btn btn-outline" data-claim-next>领取下一个</button>
+      <button type="button" class="btn btn-outline" data-claim-next>领取邮箱</button>
       <button type="button" class="btn btn-outline" data-refresh-mailbox>刷新验证码</button>
     </div>
   </div>
@@ -128,11 +128,15 @@
     const currentMeta = document.querySelector('[data-current-meta]');
     const openMailbox = document.querySelector('[data-open-mailbox]');
     const claimNextButton = document.querySelector('[data-claim-next]');
+    const refreshMailboxButton = document.querySelector('[data-refresh-mailbox]');
     const markUsedButton = document.querySelector('[data-mark-used]');
     const skipCurrentButton = document.querySelector('[data-skip-current]');
     const copyToast = document.querySelector('[data-copy-toast]');
 
     let currentMapping = null;
+    let hasClaimedInPage = false;
+    let actionPending = false;
+    let claimPendingLabel = '';
     let poller = null;
     let copyToastTimer = null;
 
@@ -188,6 +192,20 @@
         'aria-label',
         normalizedCode ? `复制最新验证码 ${normalizedCode}` : emptyLabel,
       );
+    };
+
+    const syncActionState = () => {
+      const hasCurrent = Boolean(currentMapping);
+      const hasCode = Boolean(currentCode?.dataset.copyCode);
+      if (claimNextButton) {
+        claimNextButton.disabled = actionPending || hasCurrent;
+        claimNextButton.textContent = claimPendingLabel || (
+          hasCurrent ? '请先处理当前邮箱' : (hasClaimedInPage ? '领取下一个' : '领取邮箱')
+        );
+      }
+      if (markUsedButton) markUsedButton.disabled = actionPending || !hasCurrent || !hasCode;
+      if (skipCurrentButton) skipCurrentButton.disabled = actionPending || !hasCurrent;
+      if (refreshMailboxButton) refreshMailboxButton.disabled = actionPending || !hasCurrent;
     };
 
     const formData = (extra = {}) => {
@@ -249,9 +267,11 @@
         applyPrivatePreference();
         setLatestCode();
         stopPolling();
+        syncActionState();
         return;
       }
 
+      hasClaimedInPage = true;
       currentPanel.hidden = false;
       if (mapping.address_kind === 'icloud_alias' && aliasModeInput) aliasModeInput.checked = true;
       else if (primaryModeInput) primaryModeInput.checked = true;
@@ -287,6 +307,7 @@
       openMailbox.href = mapping.mailbox_url || '#';
       setLatestCode();
       if (restartPolling) startPolling();
+      syncActionState();
     };
 
     const renderLatestCode = (payload) => {
@@ -303,6 +324,7 @@
         currentMapping = payload.mapping;
       }
       setLatestCode(payload.latest_code, payload.error ? '获取失败' : '等待验证码…');
+      syncActionState();
     };
 
     const loadCurrent = async () => {
@@ -333,23 +355,28 @@
         if (!currentMapping || currentMapping.id !== requestedMappingId) return;
         renderLatestCode(payload);
       } catch (error) {
-        if (!currentCode.dataset.copyCode) setLatestCode('', '获取失败');
+        if (!currentCode.dataset.copyCode) {
+          setLatestCode('', '获取失败');
+          syncActionState();
+        }
         if (!currentMapping?.target_tag_id) setMessage(error.message, 'error');
       }
     }
 
     const claimNext = async () => {
+      if (currentMapping) {
+        setMessage('请先在当前邮箱卡片中确认接码或跳过当前邮箱。', 'error');
+        return;
+      }
       if (!targetTagInput?.value) {
         setMessage('请先选择本次接码平台。', 'error');
         targetTagInput?.focus();
         return;
       }
-      const originalLabel = claimNextButton?.textContent || '';
-      [claimNextButton, markUsedButton, skipCurrentButton].forEach((button) => {
-        if (button) button.disabled = true;
-      });
-      if (claimNextButton) claimNextButton.textContent = '领取中…';
-      setMessage(currentMapping ? '正在释放当前邮箱并领取下一个…' : '正在领取下一个邮箱…');
+      actionPending = true;
+      claimPendingLabel = '领取中…';
+      syncActionState();
+      setMessage('正在领取邮箱…');
 
       try {
         const payload = await requestJson('/api/workbench/claim-next', {
@@ -363,10 +390,9 @@
         await loadCurrent();
         setMessage(error.message, 'error');
       } finally {
-        [claimNextButton, markUsedButton, skipCurrentButton].forEach((button) => {
-          if (button) button.disabled = false;
-        });
-        if (claimNextButton) claimNextButton.textContent = originalLabel;
+        actionPending = false;
+        claimPendingLabel = '';
+        syncActionState();
       }
     };
 
@@ -375,23 +401,22 @@
         setMessage('当前没有可处理的邮箱，请先领取一个。', 'error');
         return;
       }
-      if (!targetTagInput?.value) {
+      const isCompletion = url.endsWith('/mark-used');
+      if (isCompletion && !targetTagInput?.value) {
         setMessage('请先选择本次接码平台。', 'error');
         targetTagInput?.focus();
         return;
       }
 
-      const isCompletion = url.endsWith('/mark-used');
       if (isCompletion && !currentCode.dataset.copyCode) {
         setMessage('只有成功获取验证码后才能追加使用标签。', 'error');
         return;
       }
       const originalLabel = actionButton?.textContent || '';
-      [claimNextButton, markUsedButton, skipCurrentButton].forEach((button) => {
-        if (button) button.disabled = true;
-      });
+      actionPending = true;
+      syncActionState();
       if (actionButton) actionButton.textContent = pendingLabel;
-      setMessage(isCompletion ? '正在记录成功接码并领取下一个…' : '正在取消领取…');
+      setMessage(isCompletion ? '正在记录成功接码并追加标签…' : '正在跳过当前邮箱…');
 
       try {
         const payload = await requestJson(url, {
@@ -406,15 +431,14 @@
       } catch (error) {
         setMessage(error.message, 'error');
       } finally {
-        [claimNextButton, markUsedButton, skipCurrentButton].forEach((button) => {
-          if (button) button.disabled = false;
-        });
         if (actionButton) actionButton.textContent = originalLabel;
+        actionPending = false;
+        syncActionState();
       }
     };
 
     claimNextButton?.addEventListener('click', claimNext);
-    document.querySelector('[data-refresh-mailbox]')?.addEventListener('click', refreshLatestCode);
+    refreshMailboxButton?.addEventListener('click', refreshLatestCode);
     document.querySelector('[data-copy-email]')?.addEventListener('click', async () => {
       await copyText(currentMapping?.recipient_email || '');
       setMessage('邮箱已复制', 'success');
@@ -445,6 +469,7 @@
     });
     privateEmailInput?.addEventListener('change', () => applyPrivatePreference(true));
 
+    syncActionState();
     loadCurrent();
   })();
 </script>

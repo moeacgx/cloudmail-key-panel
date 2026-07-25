@@ -63,7 +63,7 @@ def test_workbench_source_and_platform_selects_are_top_aligned(tmp_path) -> None
     assert "lg:grid-cols-4 lg:items-end" not in response.text
 
 
-def test_legacy_claim_without_platform_can_continue_in_alias_mode(tmp_path) -> None:
+def test_legacy_claim_without_platform_must_be_finished_before_alias_mode(tmp_path) -> None:
     store = KeyStore(tmp_path / "app.db")
     store.create_tag("未使用", kind="business")
     platform = store.create_tag("Chatgpt", kind="service")
@@ -91,14 +91,12 @@ def test_legacy_claim_without_platform_can_continue_in_alias_mode(tmp_path) -> N
             "address_mode": "icloud_alias",
         },
     )
-    payload = alias_response.json()
-
-    assert alias_response.status_code == 200
-    assert "其他接码平台" not in payload.get("message", "")
-    assert payload["mapping"]["address_kind"] == "icloud_alias"
-    assert payload["mapping"]["parent_mapping_id"] == second.id
-    assert payload["mapping"]["target_tag_id"] == platform.id
-    assert store.get_by_id(first.id).status == "idle"
+    assert alias_response.status_code == 409
+    assert "请先确认当前邮箱已接码" in alias_response.json()["message"]
+    rebound = store.get_by_id(first.id)
+    assert rebound.status == "in_progress"
+    assert rebound.target_site == platform.name
+    assert store.get_by_id(second.id).status == "idle"
 
 
 def test_legacy_claim_without_platform_can_be_skipped(tmp_path) -> None:

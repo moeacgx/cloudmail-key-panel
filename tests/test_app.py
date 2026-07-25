@@ -540,15 +540,21 @@ def test_admin_create_key_panel_is_collapsed_by_default_and_opens_after_create_e
     assert "data-create-key-panel open>" in error_response.text
 
 
-def test_admin_can_reset_occupied_mapping_without_dashboard_navigation(tmp_path) -> None:
+def test_admin_can_tag_occupied_mapping_and_reset_another_without_dashboard_navigation(tmp_path) -> None:
     store = KeyStore(tmp_path / "app.db")
+    platform_tag = store.create_tag("Grok", kind="service")
     mapping = store.create_mapping(
         recipient_email="occupied@example.com",
         query_email="occupied@example.com",
         access_key="occupied-key",
         category="未使用",
     )
-    store.claim_next_available_mapping(category_filter="未使用", claimed_by="other-session")
+    reset_mapping = store.create_mapping(
+        recipient_email="reset-only@example.com",
+        access_key="reset-only-key",
+    )
+    store.update_mapping_status(mapping.id, "in_progress", claimed_by="tag-session")
+    store.update_mapping_status(reset_mapping.id, "in_progress", claimed_by="reset-session")
     settings = AppSettings(
         app_secret_key="test-secret",
         app_admin_username="admin",
@@ -564,12 +570,26 @@ def test_admin_can_reset_occupied_mapping_without_dashboard_navigation(tmp_path)
     client.post("/admin/login", data={"username": "admin", "password": "pass123"})
 
     dashboard_response = client.get("/admin")
-    reset_response = client.post(f"/api/admin/keys/{mapping.id}/reset-status")
+    update_response = client.post(
+        f"/admin/keys/{mapping.id}/update",
+        data={
+            "recipient_email": mapping.recipient_email,
+            "query_email": mapping.query_email,
+            "access_key": mapping.access_key,
+            "tag_ids": str(platform_tag.id),
+        },
+    )
+    assert update_response.status_code == 200
+    assert "工作台占用已自动解除" in update_response.text
+    assert {tag.id for tag in store.list_mapping_tags(mapping.id)} == {platform_tag.id}
+    assert store.get_by_id(mapping.id).status == "idle"
+
+    reset_response = client.post(f"/api/admin/keys/{reset_mapping.id}/reset-status")
 
     assert 'data-reset-status data-id="' in dashboard_response.text
     assert reset_response.status_code == 200
     assert reset_response.json()["mapping"]["status"] == "idle"
-    assert store.get_by_id(mapping.id).status == "idle"
+    assert store.get_by_id(reset_mapping.id).status == "idle"
 
 
 
@@ -751,6 +771,8 @@ def test_admin_workbench_claims_mailbox_reads_codes_and_moves_to_next(tmp_path) 
     assert "打开注册工作台" in dashboard_response.text
     assert workbench_response.status_code == 200
     assert "注册工作台" in workbench_response.text
+    assert "领取邮箱" in workbench_response.text
+    assert "请先处理当前邮箱" in workbench_response.text
     assert "领取下一个" in workbench_response.text
     assert 'class="grid min-w-0 gap-1" data-current-meta-wrap' in workbench_response.text
     assert 'class="block min-w-0 max-w-full truncate" data-current-meta' in workbench_response.text
@@ -775,7 +797,9 @@ def test_admin_workbench_claims_mailbox_reads_codes_and_moves_to_next(tmp_path) 
     assert "cloudmail-workbench-private-v1" in workbench_response.text
     assert "window.localStorage.setItem(PRIVATE_PREFERENCE_KEY" in workbench_response.text
     assert "mapping.address_kind === 'icloud_alias'" in workbench_response.text
-    assert workbench_response.text.count("[claimNextButton, markUsedButton, skipCurrentButton].forEach") == 4
+    assert "const syncActionState = () =>" in workbench_response.text
+    assert "claimNextButton.disabled = actionPending || hasCurrent" in workbench_response.text
+    assert "markUsedButton.disabled = actionPending || !hasCurrent || !hasCode" in workbench_response.text
     assert current_response.json()["mapping"] is None
 
     claim_response = client.post(
@@ -830,13 +854,18 @@ def test_admin_workbench_claims_mailbox_reads_codes_and_moves_to_next(tmp_path) 
     assert mark_used_response.status_code == 200
     assert mark_used_payload["completed"]["status"] == "idle"
     assert mark_used_payload["completed"]["category"] == "ChatGPT"
-    assert mark_used_payload["mapping"]["id"] == second.id
-    assert mark_used_payload["mapping"]["status"] == "in_progress"
+    assert mark_used_payload["mapping"] is None
     assert store.get_by_id(first.id).status == "idle"
     assert store.get_by_id(first.id).category == "ChatGPT"
-    assert store.get_by_id(second.id).status == "in_progress"
+    assert store.get_by_id(second.id).status == "idle"
     assert {tag.name for tag in store.list_mapping_tags(first.id)} == {"ChatGPT", "GPT"}
     assert store.count_verification_events(tag_id=platform_tag.id) == 1
+
+    next_response = client.post(
+        "/api/workbench/claim-next",
+        data={"category": "ChatGPT", "target_tag_id": str(platform_tag.id)},
+    )
+    assert next_response.json()["mapping"]["id"] == second.id
 
     # 第二条当前没有验证码，跳过才应只释放而不记录使用。
     fake_cloudmail.messages = []
@@ -990,7 +1019,7 @@ def test_admin_workbench_all_categories_advances_after_completed_mapping(tmp_pat
         data={"category": "", "target_tag_id": str(platform_tag.id)},
     )
     assert workbench_response.status_code == 200
-    assert "正在记录成功接码并领取下一个" in workbench_response.text
+    assert "正在记录成功接码并追加标签" in workbench_response.text
     assert 'value="gpt废号"' in workbench_response.text
     assert 'value="GPT废号"' not in workbench_response.text
     assert claim_response.json()["mapping"]["id"] == first.id
@@ -1009,7 +1038,13 @@ def test_admin_workbench_all_categories_advances_after_completed_mapping(tmp_pat
     assert first_complete_response.status_code == 200
     assert first_complete_payload["completed"]["id"] == first.id
     assert first_complete_payload["completed"]["category"] == "gpt废号"
-    assert first_complete_payload["mapping"]["id"] == second.id
+    assert first_complete_payload["mapping"] is None
+
+    second_claim_response = client.post(
+        "/api/workbench/claim-next",
+        data={"category": "", "target_tag_id": str(platform_tag.id)},
+    )
+    assert second_claim_response.json()["mapping"]["id"] == second.id
 
     fake_cloudmail.messages = queued_messages
     second_complete_response = client.post(
@@ -1025,11 +1060,11 @@ def test_admin_workbench_all_categories_advances_after_completed_mapping(tmp_pat
     assert second_complete_response.status_code == 200
     assert second_complete_payload["completed"]["id"] == second.id
     assert second_complete_payload["mapping"] is None
-    assert "暂无下一个可领取邮箱" in second_complete_payload["message"]
+    assert "可以领取下一个邮箱" in second_complete_payload["message"]
     assert store.count_verification_events(tag_id=platform_tag.id) == 2
 
 
-def test_admin_workbench_claim_next_button_advances_current_mapping(tmp_path) -> None:
+def test_admin_workbench_claim_next_rejects_bypassing_current_mapping(tmp_path) -> None:
     store = KeyStore(tmp_path / "app.db")
     platform_tag = store.create_tag("GPT", kind="service")
     first = store.create_mapping(recipient_email="first@example.com", access_key="first-key")
@@ -1050,16 +1085,13 @@ def test_admin_workbench_claim_next_button_advances_current_mapping(tmp_path) ->
     )
 
     claim_data = {"category": "", "target_tag_id": str(platform_tag.id)}
-    first_claim = client.post("/api/workbench/claim-next", data=claim_data).json()
-    second_claim = client.post("/api/workbench/claim-next", data=claim_data).json()
-    no_more = client.post("/api/workbench/claim-next", data=claim_data).json()
+    first_claim = client.post("/api/workbench/claim-next", data=claim_data)
+    blocked_claim = client.post("/api/workbench/claim-next", data=claim_data)
 
-    assert first_claim["mapping"]["id"] == first.id
-    assert second_claim["mapping"]["id"] == second.id
-    assert second_claim["message"] == "已跳过当前邮箱并领取下一个"
-    assert no_more["mapping"] is None
-    assert no_more["message"] == "当前邮箱已释放，暂无下一个可领取邮箱"
-    assert store.get_by_id(first.id).status == "idle"
+    assert first_claim.json()["mapping"]["id"] == first.id
+    assert blocked_claim.status_code == 409
+    assert "请先确认当前邮箱已接码" in blocked_claim.json()["error"]
+    assert store.get_by_id(first.id).status == "in_progress"
     assert store.get_by_id(second.id).status == "idle"
 
 
@@ -1101,9 +1133,10 @@ def test_admin_workbench_switching_category_can_claim_an_earlier_mapping(tmp_pat
     )
 
     assert first_claim.json()["mapping"]["id"] == current.id
-    assert switched_claim.status_code == 200
-    assert switched_claim.json()["mapping"]["id"] == earlier_other_category.id
-    assert store.get_by_id(current.id).status == "idle"
+    assert switched_claim.status_code == 409
+    assert "请先确认当前邮箱已接码" in switched_claim.json()["error"]
+    assert store.get_by_id(current.id).status == "in_progress"
+    assert store.get_by_id(earlier_other_category.id).status == "idle"
 
 
 def test_admin_workbench_current_mapping_is_isolated_by_browser_session(tmp_path) -> None:
@@ -1227,10 +1260,10 @@ def test_admin_workbench_current_mapping_is_isolated_by_browser_session(tmp_path
     assert complete_first_response.status_code == 200
     assert complete_first_payload["completed"]["id"] == first.id
     assert complete_first_payload["completed"]["status"] == "idle"
-    assert complete_first_payload["mapping"]["id"] == third.id
+    assert complete_first_payload["mapping"] is None
     assert store.get_by_id(first.id).claimed_by == ""
     assert store.get_by_id(second.id).status == "in_progress"
-    assert store.get_by_id(third.id).status == "in_progress"
+    assert store.get_by_id(third.id).status == "idle"
     assert store.count_verification_events(tag_id=platform_tag.id) == 1
     assert client_b.get("/api/workbench/current?category=ChatGPT").json()["mapping"]["id"] == second.id
 

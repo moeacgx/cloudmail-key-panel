@@ -67,7 +67,7 @@ def test_admin_refresh_binds_platform_for_pre_upgrade_active_claim(tmp_path) -> 
     assert store.is_workbench_claim_baseline_ready(mapping.id, claimed_by=rebound.claimed_by)
 
 
-def test_admin_alias_next_recovers_pre_upgrade_claim_without_platform(tmp_path) -> None:
+def test_admin_alias_next_requires_finishing_pre_upgrade_claim_without_platform(tmp_path) -> None:
     store = KeyStore(tmp_path / "app.db")
     source_tag = store.create_tag("未使用", kind="business")
     platform_tag = store.create_tag("Chatgpt", kind="service")
@@ -90,10 +90,30 @@ def test_admin_alias_next_recovers_pre_upgrade_claim_without_platform(tmp_path) 
             "address_mode": "icloud_alias",
         },
     )
-    payload = response.json()
+    assert response.status_code == 409
+    assert "请先确认当前邮箱已接码" in response.json()["message"]
+    rebound = store.get_by_id(first.id)
+    assert rebound.status == "in_progress"
+    assert rebound.target_site == platform_tag.name
+    assert store.get_by_id(second.id).status == "idle"
 
-    assert response.status_code == 200
-    assert payload["mapping"]["address_kind"] == "icloud_alias"
-    assert payload["mapping"]["parent_mapping_id"] == second.id
-    assert payload["mapping"]["target_site"] == platform_tag.name
-    assert store.get_by_id(first.id).status == "idle"
+    skipped = client.post(
+        "/api/workbench/current/skip",
+        data={"mapping_id": str(first.id)},
+    )
+    assert skipped.status_code == 200
+
+    next_response = client.post(
+        "/api/workbench/claim-next",
+        data={
+            "category": source_tag.name,
+            "target_tag_id": platform_tag.id,
+            "address_mode": "icloud_alias",
+        },
+    )
+    next_mapping = next_response.json()["mapping"]
+    assert next_response.status_code == 200
+    assert next_mapping["address_kind"] == "icloud_alias"
+    assert next_mapping["parent_mapping_id"] == first.id
+    assert next_mapping["target_site"] == platform_tag.name
+    assert store.get_by_id(second.id).status == "idle"

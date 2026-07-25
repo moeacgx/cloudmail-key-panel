@@ -1,0 +1,207 @@
+from __future__ import annotations
+
+from fastapi.testclient import TestClient
+
+from app.cloudmail import CloudMailError, CloudMailMessage
+from app.main import create_app
+from app.settings import AppSettings
+from app.store import KeyStore
+
+
+class MutableMailboxClient:
+    def __init__(self) -> None:
+        self.error = ""
+        self.messages: list[CloudMailMessage] = []
+
+    def set_code(self, recipient: str, code: str, *, email_id: int = 1) -> None:
+        self.messages = [
+            CloudMailMessage(
+                email_id=email_id,
+                send_email="noreply@openai.com",
+                send_name="OpenAI",
+                subject=f"Your verification code is {code}",
+                to_email=recipient,
+                to_name="",
+                create_time="2099-01-01 00:00:00",
+                type=0,
+                content=f"<p>{code}</p>",
+                text=f"Your verification code is {code}",
+                is_del=0,
+            )
+        ]
+
+    def fetch_recent_emails(self, recipient_email: str, limit: int = 10):
+        if self.error:
+            raise CloudMailError(self.error)
+        return self.messages[:limit]
+
+
+def _admin_client(tmp_path, store: KeyStore, cloudmail: MutableMailboxClient) -> TestClient:
+    settings = AppSettings(
+        app_secret_key="workbench-regression-test",
+        app_admin_username="admin",
+        app_admin_password="pass123",
+        database_path=str(tmp_path / "app.db"),
+        cloudmail_base_url="https://mail.example.com",
+        cloudmail_api_token="token",
+    )
+    client = TestClient(create_app(settings=settings, store=store, cloudmail_client=cloudmail))
+    client.post("/admin/login", data={"username": "admin", "password": "pass123"})
+    return client
+
+
+def _claim(client: TestClient, *, category: str, target_tag_id: int):
+    response = client.post(
+        "/api/workbench/claim-next",
+        data={"category": category, "target_tag_id": str(target_tag_id)},
+    )
+    assert response.status_code == 200
+    return response.json()["mapping"]
+
+
+def test_skip_button_does_not_require_a_platform_selection(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    client = _admin_client(tmp_path, store, MutableMailboxClient())
+
+    page = client.get("/admin/workbench")
+
+    assert page.status_code == 200
+    assert "if (isCompletion && !targetTagInput?.value)" in page.text
+
+
+def test_skip_releases_current_even_when_mailbox_query_is_broken(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    source = store.create_tag("未使用", kind="business")
+    platform = store.create_tag("OpenAI", kind="service")
+    mapping = store.create_mapping("skip-on-error@example.com", category=source.name)
+    cloudmail = MutableMailboxClient()
+    client = _admin_client(tmp_path, store, cloudmail)
+    claimed = _claim(client, category=source.name, target_tag_id=platform.id)
+    assert claimed["id"] == mapping.id
+
+    cloudmail.error = "upstream unavailable"
+    skipped = client.post(
+        "/api/workbench/current/skip",
+        data={"mapping_id": str(mapping.id)},
+    )
+
+    assert skipped.status_code == 200
+    assert skipped.json()["mapping"] is None
+    assert "解除占用" in skipped.json()["message"]
+    refreshed = store.get_by_id(mapping.id)
+    assert refreshed is not None and refreshed.status == "idle"
+    assert platform.id not in {tag.id for tag in store.list_mapping_tags(mapping.id)}
+    assert store.count_verification_events(tag_id=platform.id) == 0
+
+
+def test_failed_initial_snapshot_still_restores_mapping_and_allows_skip(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    source = store.create_tag("未使用", kind="business")
+    platform = store.create_tag("OpenAI", kind="service")
+    mapping = store.create_mapping("snapshot-error@example.com", category=source.name)
+    cloudmail = MutableMailboxClient()
+    cloudmail.error = "upstream unavailable"
+    client = _admin_client(tmp_path, store, cloudmail)
+
+    failed_claim = client.post(
+        "/api/workbench/claim-next",
+        data={"category": source.name, "target_tag_id": str(platform.id)},
+    )
+    restored = client.get("/api/workbench/current")
+
+    assert failed_claim.status_code == 502
+    assert restored.status_code == 200
+    assert restored.json()["mapping"]["id"] == mapping.id
+    assert "仍可跳过当前邮箱" in restored.json()["message"]
+
+    skipped = client.post(
+        "/api/workbench/current/skip",
+        data={"mapping_id": str(mapping.id)},
+    )
+    assert skipped.status_code == 200
+    assert store.get_by_id(mapping.id).status == "idle"
+
+
+def test_dashboard_can_save_manual_tags_and_release_occupied_mapping_on_mailbox_error(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    source = store.create_tag("未使用", kind="business")
+    platform = store.create_tag("OpenAI", kind="service")
+    mapping = store.create_mapping(
+        "save-tag-on-error@example.com",
+        query_email="save-tag-on-error@example.com",
+        access_key="save-tag-on-error-key",
+        category=source.name,
+    )
+    cloudmail = MutableMailboxClient()
+    client = _admin_client(tmp_path, store, cloudmail)
+    _claim(client, category=source.name, target_tag_id=platform.id)
+
+    cloudmail.error = "upstream unavailable"
+    saved = client.post(
+        f"/admin/keys/{mapping.id}/update",
+        data={
+            "recipient_email": mapping.recipient_email,
+            "query_email": mapping.query_email,
+            "access_key": mapping.access_key,
+            "category_value": source.name,
+            "tag_ids": [str(source.id), str(platform.id)],
+        },
+    )
+
+    assert saved.status_code == 200
+    assert "工作台占用已自动解除" in saved.text
+    refreshed = store.get_by_id(mapping.id)
+    assert refreshed is not None and refreshed.status == "idle"
+    assert {tag.id for tag in store.list_mapping_tags(mapping.id)} == {source.id, platform.id}
+
+
+def test_claim_next_refuses_to_replace_an_unfinished_mapping(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    source = store.create_tag("未使用", kind="business")
+    platform = store.create_tag("OpenAI", kind="service")
+    first = store.create_mapping("first-unfinished@example.com", category=source.name)
+    second = store.create_mapping("second-unfinished@example.com", category=source.name)
+    cloudmail = MutableMailboxClient()
+    client = _admin_client(tmp_path, store, cloudmail)
+    claimed = _claim(client, category=source.name, target_tag_id=platform.id)
+    assert claimed["id"] == first.id
+
+    repeated = client.post(
+        "/api/workbench/claim-next",
+        data={"category": source.name, "target_tag_id": str(platform.id)},
+    )
+
+    assert repeated.status_code == 409
+    assert "请先确认当前邮箱已接码" in repeated.json()["message"]
+    assert store.get_by_id(first.id).status == "in_progress"
+    assert store.get_by_id(second.id).status == "idle"
+    assert store.count_verification_events(tag_id=platform.id) == 0
+
+
+def test_confirming_code_finishes_current_without_automatically_claiming_next(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    source = store.create_tag("未使用", kind="business")
+    platform = store.create_tag("OpenAI", kind="service")
+    first = store.create_mapping("first-completed@example.com", category=source.name)
+    second = store.create_mapping("second-after-completed@example.com", category=source.name)
+    cloudmail = MutableMailboxClient()
+    client = _admin_client(tmp_path, store, cloudmail)
+    claimed = _claim(client, category=source.name, target_tag_id=platform.id)
+    assert claimed["id"] == first.id
+
+    cloudmail.set_code(first.recipient_email, "345678")
+    completed = client.post(
+        "/api/workbench/current/mark-used",
+        data={"mapping_id": str(first.id), "target_tag_id": str(platform.id)},
+    )
+
+    assert completed.status_code == 200
+    assert completed.json()["mapping"] is None
+    assert "可以领取下一个邮箱" in completed.json()["message"]
+    assert store.get_by_id(first.id).status == "idle"
+    assert store.get_by_id(second.id).status == "idle"
+    assert platform.id in {tag.id for tag in store.list_mapping_tags(first.id)}
+    assert store.count_verification_events(tag_id=platform.id) == 1
+
+    next_claim = _claim(client, category=source.name, target_tag_id=platform.id)
+    assert next_claim["id"] == second.id

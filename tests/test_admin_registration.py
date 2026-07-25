@@ -93,10 +93,22 @@ def test_admin_alias_mode_records_usage_on_root_and_can_repeat_same_service(tmp_
     assert store.count_verification_events(tag_id=gpt.id) == 1
     assert store.get_tag(gpt.id).success_count == 1
     assert store.get_by_id(root.id).first_used_at
-    assert payload["mapping"]["address_kind"] == "icloud_alias"
-    assert payload["mapping"]["recipient_email"] != claimed["recipient_email"]
+    assert payload["mapping"] is None
 
-    second_alias_id = payload["mapping"]["id"]
+    next_response = client.post(
+        "/api/workbench/claim-next",
+        data={
+            "category": "未使用",
+            "target_tag_id": str(gpt.id),
+            "address_mode": "icloud_alias",
+        },
+    )
+    next_alias = next_response.json()["mapping"]
+    assert next_response.status_code == 200
+    assert next_alias["address_kind"] == "icloud_alias"
+    assert next_alias["recipient_email"] != claimed["recipient_email"]
+
+    second_alias_id = next_alias["id"]
     skipped = client.post(
         "/api/workbench/current/skip",
         data={
@@ -162,7 +174,7 @@ def test_admin_prevent_pool_marks_previously_used_mailbox_as_retired(tmp_path) -
     assert store.count_verification_events(tag_id=gpt.id) == 1
 
 
-def test_admin_skip_records_success_when_code_has_already_arrived(tmp_path) -> None:
+def test_admin_skip_releases_without_recording_an_arrived_code(tmp_path) -> None:
     store = KeyStore(tmp_path / "app.db")
     store.create_tag("未使用", kind="business")
     mapping = store.create_mapping("skip-arrived@icloud.com", category="未使用")
@@ -186,14 +198,14 @@ def test_admin_skip_records_success_when_code_has_already_arrived(tmp_path) -> N
 
     refreshed = store.get_by_id(mapping.id)
     assert skipped.status_code == 200
-    assert "已按成功接码记录" in skipped.json()["message"]
-    assert refreshed.first_used_at
-    assert refreshed.reuse_policy == "independent"
-    assert [tag.id for tag in store.list_mapping_tags(mapping.id) if tag.name == "GPT"] == [gpt.id]
-    assert store.count_verification_events(tag_id=gpt.id) == 1
+    assert "解除占用" in skipped.json()["message"]
+    assert not refreshed.first_used_at
+    assert refreshed.reuse_policy == "reusable"
+    assert [tag.id for tag in store.list_mapping_tags(mapping.id) if tag.name == "GPT"] == []
+    assert store.count_verification_events(tag_id=gpt.id) == 0
 
 
-def test_admin_claim_next_cannot_silently_skip_an_arrived_code(tmp_path) -> None:
+def test_admin_claim_next_refuses_to_replace_current_even_if_code_has_arrived(tmp_path) -> None:
     store = KeyStore(tmp_path / "app.db")
     store.create_tag("未使用", kind="business")
     first = store.create_mapping("claim-next-first@icloud.com", category="未使用")
@@ -216,11 +228,22 @@ def test_admin_claim_next_cannot_silently_skip_an_arrived_code(tmp_path) -> None
         },
     )
 
-    payload = next_response.json()
-    assert next_response.status_code == 200
-    assert "已按成功接码记录" in payload["message"]
-    assert payload["mapping"]["id"] == second.id
+    assert next_response.status_code == 409
+    assert "请先确认当前邮箱已接码" in next_response.json()["message"]
+    assert store.get_by_id(first.id).status == "in_progress"
+    assert store.get_by_id(second.id).status == "idle"
+    assert not store.get_by_id(first.id).first_used_at
+    assert [tag.id for tag in store.list_mapping_tags(first.id) if tag.name == "GPT"] == []
+    assert store.count_verification_events(tag_id=gpt.id) == 0
+
+    completed = client.post(
+        "/api/workbench/current/mark-used",
+        data={"mapping_id": str(first.id), "target_tag_id": str(gpt.id)},
+    )
+    assert completed.status_code == 200
+    assert completed.json()["mapping"] is None
     assert store.get_by_id(first.id).first_used_at
+    assert store.get_by_id(second.id).status == "idle"
     assert [tag.id for tag in store.list_mapping_tags(first.id) if tag.name == "GPT"] == [gpt.id]
     assert store.count_verification_events(tag_id=gpt.id) == 1
 

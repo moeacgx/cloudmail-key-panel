@@ -567,21 +567,24 @@ def create_app(
         mapping = request.app.state.store.get_current_workbench_mapping(
             claimed_by=_get_workbench_session_id(request),
         )
+        baseline_error = ""
         if mapping is not None:
             try:
                 mapping = _ensure_workbench_claim_baseline(request, mapping)
             except CloudMailError as exc:
-                return _json_error(
-                    f"邮箱尚未交付，邮件快照初始化失败：{exc}",
-                    status.HTTP_502_BAD_GATEWAY,
-                )
+                baseline_error = f"邮件快照初始化失败：{exc}"
         return JSONResponse(
             {
                 "mapping": _serialize_workbench_mapping(request, mapping),
+                "error": baseline_error or None,
                 "message": (
-                    "已恢复当前邮箱，请先选择本次接码平台"
-                    if mapping is not None and not mapping.target_site.strip()
-                    else ("已恢复当前注册中的邮箱" if mapping else "当前没有注册中的邮箱")
+                    f"已恢复当前邮箱，但{baseline_error}；仍可跳过当前邮箱"
+                    if mapping is not None and baseline_error
+                    else (
+                        "已恢复当前邮箱，请先选择本次接码平台"
+                        if mapping is not None and not mapping.target_site.strip()
+                        else ("已恢复当前注册中的邮箱" if mapping else "当前没有注册中的邮箱")
+                    )
                 ),
             }
         )
@@ -604,8 +607,6 @@ def create_app(
 
         workbench_session_id = _get_workbench_session_id(request)
         current = request.app.state.store.get_current_workbench_mapping(claimed_by=workbench_session_id)
-        after_mapping_id = None
-        completed_by_arrived_code = False
         if current is not None:
             if not current.target_site.strip():
                 try:
@@ -642,41 +643,15 @@ def create_app(
                         "message": "已恢复此前预留的邮箱",
                     }
                 )
-            mailbox_payload, mailbox_status = _build_workbench_latest_code_payload(request, current)
-            if mailbox_status != status.HTTP_200_OK:
-                return _json_error(
-                    mailbox_payload.get("error") or "验证码查询失败，请稍后重试",
-                    mailbox_status,
-                )
-            if mailbox_payload.get("latest_code"):
-                try:
-                    request.app.state.store.complete_workbench_mapping(
-                        mapping_id=current.id,
-                        target_tag_id=current_target_tag.id,
-                        claimed_by=workbench_session_id,
-                        verification_source="admin_workbench",
-                        email_id=int(mailbox_payload.get("latest_email_id") or 0),
-                        prevent_reuse=prevent_shared_pool,
-                    )
-                except ValueError as exc:
-                    return _json_error(_translate_store_error(str(exc)), status.HTTP_409_CONFLICT)
-                completed_by_arrived_code = True
-            else:
-                request.app.state.store.reset_mapping_status(current.id, claimed_by=workbench_session_id)
-            selected_source_tag_id = request.app.state.store.get_category_id(category)
-            current_source_tag_ids = {
-                tag.id for tag in request.app.state.store.list_mapping_tags(current.id)
-            }
-            if current.address_kind == "primary" and (
-                not category.strip() or selected_source_tag_id in current_source_tag_ids
-            ):
-                after_mapping_id = current.parent_mapping_id or current.id
+            return _json_error(
+                "请先确认当前邮箱已接码，或使用“跳过当前邮箱”后再领取",
+                status.HTTP_409_CONFLICT,
+            )
 
         mapping = request.app.state.store.claim_next_available_mapping(
             category_filter=category,
             target_site=target_tag.name,
             claimed_by=workbench_session_id,
-            after_mapping_id=after_mapping_id,
             address_mode="primary" if prevent_shared_pool else address_mode,
             exclude_tag_id=target_tag.id,
             defer_email_baseline=True,
@@ -689,17 +664,7 @@ def create_app(
                     f"邮箱已预留但尚未交付，邮件快照初始化失败：{exc}",
                     status.HTTP_502_BAD_GATEWAY,
                 )
-        if current is not None:
-            if completed_by_arrived_code:
-                message = (
-                    "验证码已经到达，已按成功接码记录并领取下一个"
-                    if mapping
-                    else "验证码已经到达，已按成功接码记录；暂无下一个可领取邮箱"
-                )
-            else:
-                message = "已跳过当前邮箱并领取下一个" if mapping else "当前邮箱已释放，暂无下一个可领取邮箱"
-        else:
-            message = "已领取下一个邮箱" if mapping else "当前分类下没有可领取邮箱"
+        message = "已领取邮箱" if mapping else "当前分类下没有可领取邮箱"
         return JSONResponse(
             {
                 "mapping": _serialize_workbench_mapping(request, mapping),
@@ -759,9 +724,7 @@ def create_app(
     def api_workbench_mark_used(
         request: Request,
         mapping_id: int = Form(...),
-        category: str = Form(""),
         target_tag_id: int = Form(...),
-        address_mode: str = Form("primary"),
         prevent_shared_pool: bool = Form(False),
     ) -> JSONResponse:
         if not _is_admin(request):
@@ -805,9 +768,7 @@ def create_app(
             request,
             mapping_id=mapping_id,
             target_tag_id=target_tag.id,
-            category=category,
             claimed_by=_get_workbench_session_id(request),
-            address_mode=address_mode,
             prevent_reuse=prevent_shared_pool,
             email_id=latest_email_id,
             verification_source="admin_workbench",
@@ -825,9 +786,6 @@ def create_app(
     def api_workbench_skip(
         request: Request,
         mapping_id: int = Form(...),
-        category: str = Form(""),
-        target_tag_id: int = Form(...),
-        prevent_shared_pool: bool = Form(False),
     ) -> JSONResponse:
         if not _is_admin(request):
             return _json_error("unauthorized", status.HTTP_401_UNAUTHORIZED)
@@ -839,60 +797,19 @@ def create_app(
             return _json_error("只能取消注册中的邮箱", status.HTTP_400_BAD_REQUEST)
         if mapping.claimed_by != _get_workbench_session_id(request):
             return _json_error("这个邮箱不是当前工作台领取的", status.HTTP_409_CONFLICT)
-        target_tag = _selectable_platform_tag(request.app.state.store, target_tag_id)
-        if target_tag is not None and not mapping.target_site.strip():
-            try:
-                mapping = request.app.state.store.bind_workbench_target_tag(
-                    mapping.id,
-                    claimed_by=_get_workbench_session_id(request),
-                    target_tag_id=target_tag.id,
-                )
-            except ValueError as exc:
-                return _json_error(
-                    _translate_store_error(str(exc)),
-                    status.HTTP_409_CONFLICT,
-                )
-        current_target_tag = _platform_tag_for_mapping(request.app.state.store, mapping)
-        if target_tag is None or current_target_tag is None or target_tag.id != current_target_tag.id:
-            return _json_error("当前邮箱的接码平台不一致", status.HTTP_409_CONFLICT)
-
-        mailbox_payload, mailbox_status = _build_workbench_latest_code_payload(request, mapping)
-        if mailbox_status != status.HTTP_200_OK:
-            return _json_error(
-                mailbox_payload.get("error") or "验证码查询失败，请稍后重试",
-                mailbox_status,
-            )
 
         try:
-            received_code = bool(mailbox_payload.get("latest_code"))
-            if received_code:
-                latest_email_id = int(mailbox_payload.get("latest_email_id") or 0)
-                if latest_email_id <= 0:
-                    return _json_error("验证码邮件缺少可记账的邮件编号", status.HTTP_409_CONFLICT)
-                completed = request.app.state.store.complete_workbench_mapping(
-                    mapping_id=mapping_id,
-                    target_tag_id=target_tag.id,
-                    claimed_by=_get_workbench_session_id(request),
-                    verification_source="admin_workbench",
-                    email_id=latest_email_id,
-                    prevent_reuse=prevent_shared_pool,
-                )
-            else:
-                completed = request.app.state.store.reset_mapping_status(
-                    mapping_id,
-                    claimed_by=_get_workbench_session_id(request),
-                )
+            completed = request.app.state.store.reset_mapping_status(
+                mapping_id,
+                claimed_by=_get_workbench_session_id(request),
+            )
         except ValueError as exc:
             return _json_error(_translate_store_error(str(exc)), status.HTTP_409_CONFLICT)
         return JSONResponse(
             {
                 "completed": _serialize_workbench_mapping(request, completed),
                 "mapping": None,
-                "message": (
-                    "验证码已经到达，已按成功接码记录并追加标签"
-                    if received_code
-                    else "已取消领取，标签未改变"
-                ),
+                "message": "已跳过当前邮箱并解除占用，标签未改变",
             }
         )
 
@@ -1171,7 +1088,14 @@ def create_app(
         if not _is_admin(request):
             return RedirectResponse(url="/admin/login", status_code=status.HTTP_303_SEE_OTHER)
 
+        released_workbench_claim = False
         try:
+            original_mapping = request.app.state.store.get_by_id(mapping_id)
+            original_tag_ids = (
+                {tag.id for tag in request.app.state.store.list_mapping_tags(mapping_id)}
+                if original_mapping is not None
+                else set()
+            )
             resolved_category = _resolve_mapping_category(category_value, category_custom)
             if not resolved_category:
                 resolved_category = _legacy_category_from_tag_ids(request.app.state.store, tag_ids)
@@ -1188,6 +1112,14 @@ def create_app(
             if category_id is not None and category_id not in resolved_tag_ids:
                 resolved_tag_ids.append(category_id)
             request.app.state.store.set_mapping_tags(updated_mapping.id, resolved_tag_ids)
+            added_service_tag = any(
+                tag.kind == "service"
+                for tag_id in set(resolved_tag_ids) - original_tag_ids
+                if (tag := request.app.state.store.get_tag(tag_id)) is not None
+            )
+            if original_mapping is not None and original_mapping.status == "in_progress" and added_service_tag:
+                request.app.state.store.reset_mapping_status(updated_mapping.id)
+                released_workbench_claim = True
         except ValueError as exc:
             return _render_admin_dashboard(
                 request,
@@ -1200,7 +1132,11 @@ def create_app(
 
         return _render_admin_dashboard(
             request,
-            message="Key 已更新",
+            message=(
+                "Key 已更新，工作台占用已自动解除"
+                if released_workbench_claim
+                else "Key 已更新"
+            ),
             search_query=q,
             category_filter=category,
             page=page,
@@ -1663,9 +1599,7 @@ def _complete_workbench_mapping(
     request: Request,
     mapping_id: int,
     target_tag_id: int,
-    category: str,
     claimed_by: str,
-    address_mode: str = "primary",
     prevent_reuse: bool = False,
     email_id: int = 0,
     verification_source: str = "admin_workbench",
@@ -1692,26 +1626,7 @@ def _complete_workbench_mapping(
         email_id=int(email_id),
         prevent_reuse=prevent_reuse,
     )
-    next_mapping = request.app.state.store.claim_next_available_mapping(
-        category_filter=category,
-        target_site=target_tag.name,
-        claimed_by=claimed_by,
-        address_mode="primary" if prevent_reuse else address_mode,
-        exclude_tag_id=target_tag.id,
-        defer_email_baseline=True,
-    )
-    if next_mapping is None:
-        return completed, None, f"已记录成功接码并追加“{target_tag.name}”标签，暂无下一个可领取邮箱", status.HTTP_200_OK
-    try:
-        next_mapping = _ensure_workbench_claim_baseline(request, next_mapping)
-    except CloudMailError:
-        return (
-            completed,
-            None,
-            f"已记录成功接码并追加“{target_tag.name}”标签；下一个邮箱尚未完成快照，请重新领取",
-            status.HTTP_200_OK,
-        )
-    return completed, next_mapping, f"已记录成功接码并追加“{target_tag.name}”标签，同时领取下一个邮箱", status.HTTP_200_OK
+    return completed, None, f"已记录成功接码并追加“{target_tag.name}”标签，可以领取下一个邮箱", status.HTTP_200_OK
 
 
 def _resolve_mapping_category(category: str, custom_category: str) -> str:
