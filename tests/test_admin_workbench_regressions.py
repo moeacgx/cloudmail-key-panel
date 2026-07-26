@@ -94,6 +94,63 @@ def test_skip_releases_current_even_when_mailbox_query_is_broken(tmp_path) -> No
     assert store.count_verification_events(tag_id=platform.id) == 0
 
 
+def test_void_current_retires_mailbox_and_replaces_source_tag(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    source = store.create_tag("未使用", kind="business")
+    platform = store.create_tag("OpenAI", kind="service")
+    history = store.create_tag("Claude", kind="service")
+    mapping = store.create_mapping("dead-mailbox@example.com", category=source.name)
+    store.add_mapping_tag(mapping.id, history.id, source="usage")
+    cloudmail = MutableMailboxClient()
+    client = _admin_client(tmp_path, store, cloudmail)
+    claimed = _claim(client, category=source.name, target_tag_id=platform.id)
+    assert claimed["id"] == mapping.id
+
+    voided = client.post(
+        "/api/workbench/current/void",
+        data={"mapping_id": str(mapping.id)},
+    )
+
+    assert voided.status_code == 200
+    assert voided.json()["mapping"] is None
+    assert "不会再次发放" in voided.json()["message"]
+    refreshed = store.get_by_id(mapping.id)
+    assert refreshed is not None
+    assert refreshed.status == "idle"
+    assert refreshed.reuse_policy == "retired"
+    assert refreshed.target_site == ""
+    tags = {tag.name: tag for tag in store.list_mapping_tags(mapping.id)}
+    assert "未使用" not in tags
+    assert "OpenAI" not in tags
+    assert tags["邮箱作废"].prevents_reuse is True
+    assert tags["Claude"].kind == "service"
+    assert store.count_verification_events(tag_id=platform.id) == 0
+
+    repeated = client.post(
+        "/api/workbench/claim-next",
+        data={"category": "", "target_tag_id": str(platform.id)},
+    )
+    assert repeated.status_code == 200
+    assert repeated.json()["mapping"] is None
+
+    dashboard = client.get("/admin")
+    assert dashboard.status_code == 200
+    assert "已作废" in dashboard.text
+    assert "完全未使用" not in dashboard.text
+
+
+def test_workbench_page_exposes_confirmed_void_action(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    client = _admin_client(tmp_path, store, MutableMailboxClient())
+
+    page = client.get("/admin/workbench")
+
+    assert page.status_code == 200
+    assert "作废当前邮箱" in page.text
+    assert "/api/workbench/current/void" in page.text
+    assert "window.confirm" in page.text
+
+
 def test_failed_initial_snapshot_still_restores_mapping_and_allows_skip(tmp_path) -> None:
     store = KeyStore(tmp_path / "app.db")
     source = store.create_tag("未使用", kind="business")

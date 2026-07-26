@@ -664,6 +664,19 @@ class KeyStore:
                 return existing
         return self.create_tag(system_name, "#64748b", kind="system")
 
+    def ensure_void_email_tag(self) -> TagOption:
+        """返回一键作废邮箱使用的可见标签，并确保该标签禁止再次复用。"""
+        tag_name = "邮箱作废"
+        existing_id = self.get_category_id(tag_name)
+        if existing_id is not None:
+            return self.set_tag_prevents_reuse(existing_id, True)
+        return self.create_tag(
+            tag_name,
+            "#ef4444",
+            kind="business",
+            prevents_reuse=True,
+        )
+
     def rename_tag(
         self,
         tag_id: int,
@@ -3019,6 +3032,96 @@ class KeyStore:
             if normalized_claimed_by is not None:
                 raise ValueError("mapping not claimed by this session")
             raise ValueError("mapping not found")
+
+        updated = self.get_by_id(mapping_id)
+        if updated is None:
+            raise ValueError("mapping not found")
+        return updated
+
+    def void_workbench_mapping(
+        self,
+        mapping_id: int,
+        *,
+        claimed_by: str,
+        void_tag_id: int,
+    ) -> AccessMapping:
+        """作废当前工作台邮箱，释放占用并永久排除整个邮箱族。"""
+        normalized_claimed_by = claimed_by.strip()
+        if not normalized_claimed_by:
+            raise ValueError("claimed_by is required")
+
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current = connection.execute(
+                """
+                SELECT id, parent_mapping_id, claim_source_tag_id
+                FROM access_mappings
+                WHERE id = ? AND status = 'in_progress' AND claimed_by = ?
+                """,
+                (int(mapping_id), normalized_claimed_by),
+            ).fetchone()
+            if current is None:
+                connection.rollback()
+                raise ValueError("mapping not claimed by this session")
+
+            void_tag = connection.execute(
+                "SELECT id, name FROM categories WHERE id = ?",
+                (int(void_tag_id),),
+            ).fetchone()
+            if void_tag is None:
+                connection.rollback()
+                raise ValueError("tag not found")
+
+            root_mapping_id = int(current["parent_mapping_id"] or current["id"])
+            cursor = connection.execute(
+                """
+                UPDATE access_mappings
+                SET status = 'idle',
+                    claimed_at = '',
+                    claimed_by = '',
+                    claim_baseline_ready = 1,
+                    claim_source_tag_id = 0,
+                    target_site = '',
+                    reuse_policy = 'retired'
+                WHERE id = ? AND status = 'in_progress' AND claimed_by = ?
+                """,
+                (int(mapping_id), normalized_claimed_by),
+            )
+            if cursor.rowcount != 1:
+                connection.rollback()
+                raise ValueError("mapping not claimed by this session")
+
+            # 作废代表整个邮箱族均不可再发放；裂变地址出错时也必须锁住主邮箱，
+            # 否则同一失效邮箱仍可能从其他领取入口重新进入队列。
+            connection.execute(
+                "UPDATE access_mappings SET reuse_policy = 'retired' WHERE id = ?",
+                (root_mapping_id,),
+            )
+            source_tag_id = int(current["claim_source_tag_id"] or 0)
+            if source_tag_id and source_tag_id != int(void_tag_id):
+                connection.execute(
+                    """
+                    DELETE FROM mapping_tags
+                    WHERE mapping_id = ? AND tag_id = ? AND source != 'usage'
+                    """,
+                    (root_mapping_id, source_tag_id),
+                )
+            connection.execute(
+                """
+                INSERT INTO mapping_tags (mapping_id, tag_id, source, created_at)
+                VALUES (?, ?, 'manual', ?)
+                ON CONFLICT(mapping_id, tag_id) DO UPDATE SET source = CASE
+                    WHEN mapping_tags.source = 'usage' THEN 'usage'
+                    ELSE 'manual'
+                END
+                """,
+                (root_mapping_id, int(void_tag_id), self._now()),
+            )
+            connection.execute(
+                "UPDATE access_mappings SET category = ? WHERE id = ?",
+                (str(void_tag["name"]), root_mapping_id),
+            )
+            connection.commit()
 
         updated = self.get_by_id(mapping_id)
         if updated is None:

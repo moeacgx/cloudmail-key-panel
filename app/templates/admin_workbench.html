@@ -99,6 +99,7 @@
     <button type="button" class="btn btn-outline" data-copy-key>复制 Key</button>
     <button type="button" class="btn btn-outline" data-mark-used>确认接码并追加标签</button>
     <button type="button" class="btn btn-ghost" data-skip-current>跳过当前邮箱</button>
+    <button type="button" class="btn btn-error btn-outline" data-void-current title="追加“邮箱作废”标签，并永久停止发放整个邮箱族">作废当前邮箱</button>
   </div>
   </div>
 </section>
@@ -131,6 +132,7 @@
     const refreshMailboxButton = document.querySelector('[data-refresh-mailbox]');
     const markUsedButton = document.querySelector('[data-mark-used]');
     const skipCurrentButton = document.querySelector('[data-skip-current]');
+    const voidCurrentButton = document.querySelector('[data-void-current]');
     const copyToast = document.querySelector('[data-copy-toast]');
 
     let currentMapping = null;
@@ -205,6 +207,7 @@
       }
       if (markUsedButton) markUsedButton.disabled = actionPending || !hasCurrent || !hasCode;
       if (skipCurrentButton) skipCurrentButton.disabled = actionPending || !hasCurrent;
+      if (voidCurrentButton) voidCurrentButton.disabled = actionPending || !hasCurrent;
       if (refreshMailboxButton) refreshMailboxButton.disabled = actionPending || !hasCurrent;
     };
 
@@ -402,6 +405,7 @@
         return;
       }
       const isCompletion = url.endsWith('/mark-used');
+      const isVoid = url.endsWith('/void');
       if (isCompletion && !targetTagInput?.value) {
         setMessage('请先选择本次接码平台。', 'error');
         targetTagInput?.focus();
@@ -416,7 +420,11 @@
       actionPending = true;
       syncActionState();
       if (actionButton) actionButton.textContent = pendingLabel;
-      setMessage(isCompletion ? '正在记录成功接码并追加标签…' : '正在跳过当前邮箱…');
+      setMessage(
+        isCompletion
+          ? '正在记录成功接码并追加标签…'
+          : (isVoid ? '正在作废当前邮箱并追加标签…' : '正在跳过当前邮箱…'),
+      );
 
       try {
         const payload = await requestJson(url, {
@@ -452,6 +460,13 @@
     });
     skipCurrentButton?.addEventListener('click', () => {
       completeCurrent('/api/workbench/current/skip', skipCurrentButton, '取消中…');
+    });
+    voidCurrentButton?.addEventListener('click', () => {
+      if (!currentMapping) return;
+      const confirmed = window.confirm(
+        `确定作废 ${currentMapping.recipient_email || '当前邮箱'} 吗？\n\n系统会追加“邮箱作废”标签，并永久停止发放整个邮箱族。`,
+      );
+      if (confirmed) completeCurrent('/api/workbench/current/void', voidCurrentButton, '作废中…');
     });
     currentCode?.addEventListener('click', async () => {
       const code = currentCode.dataset.copyCode || '';

@@ -813,6 +813,39 @@ def create_app(
             }
         )
 
+    @app.post("/api/workbench/current/void")
+    def api_workbench_void(
+        request: Request,
+        mapping_id: int = Form(...),
+    ) -> JSONResponse:
+        if not _is_admin(request):
+            return _json_error("unauthorized", status.HTTP_401_UNAUTHORIZED)
+
+        mapping = request.app.state.store.get_by_id(mapping_id)
+        if mapping is None:
+            return _json_error("这个 Key 记录不存在或已被删除", status.HTTP_404_NOT_FOUND)
+        if mapping.status != "in_progress":
+            return _json_error("只能作废注册中的当前邮箱", status.HTTP_400_BAD_REQUEST)
+        if mapping.claimed_by != _get_workbench_session_id(request):
+            return _json_error("这个邮箱不是当前工作台领取的", status.HTTP_409_CONFLICT)
+
+        try:
+            void_tag = request.app.state.store.ensure_void_email_tag()
+            voided = request.app.state.store.void_workbench_mapping(
+                mapping_id,
+                claimed_by=_get_workbench_session_id(request),
+                void_tag_id=void_tag.id,
+            )
+        except ValueError as exc:
+            return _json_error(_translate_store_error(str(exc)), status.HTTP_409_CONFLICT)
+        return JSONResponse(
+            {
+                "completed": _serialize_workbench_mapping(request, voided),
+                "mapping": None,
+                "message": "当前邮箱已作废并解除占用，已追加“邮箱作废”标签且不会再次发放",
+            }
+        )
+
     @app.post("/api/workbench/current/reset-status")
     def api_workbench_reset_status(
         request: Request,
@@ -1764,7 +1797,9 @@ def _render_admin_dashboard(
     for mapping in mappings:
         mapping_tags = request.app.state.store.list_mapping_tags(mapping.id)
         usage_state = (
-            "successful"
+            "voided"
+            if any(tag.name == "邮箱作废" for tag in mapping_tags)
+            else "successful"
             if mapping.first_used_at
             else "platform_tagged"
             if any(tag.kind == "service" for tag in mapping_tags)

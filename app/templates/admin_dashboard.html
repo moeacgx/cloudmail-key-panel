@@ -294,7 +294,9 @@
                   {% endif %}
                   {% if item.reuse_policy | default('reusable') == 'independent' %}<span class="badge badge-info badge-outline">独立邮箱</span>{% endif %}
                   {% if item.reuse_policy | default('reusable') == 'retired' %}<span class="badge badge-ghost">停止复用</span>{% endif %}
-                  {% if item.usage_state | default('never_used') == 'successful' %}
+                  {% if item.usage_state | default('never_used') == 'voided' %}
+                    <span class="badge badge-error badge-outline">已作废</span>
+                  {% elif item.usage_state | default('never_used') == 'successful' %}
                     <span class="badge badge-success badge-outline">已成功接码</span>
                   {% elif item.usage_state | default('never_used') == 'platform_tagged' %}
                     <span class="badge badge-info badge-outline">已有平台使用标签</span>
