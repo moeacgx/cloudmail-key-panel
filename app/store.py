@@ -2723,7 +2723,7 @@ class KeyStore:
         claimed_by: str,
         target_tag_id: int,
     ) -> AccessMapping:
-        """为旧领取补绑定平台；已有平台时只允许同一标签重复确认。"""
+        """绑定或切换当前工作台邮箱的平台标签。"""
 
         normalized_claimed_by = claimed_by.strip()
         if not normalized_claimed_by:
@@ -2755,20 +2755,15 @@ class KeyStore:
                 connection.rollback()
                 raise ValueError("tag not found")
 
-            current_target = str(mapping["target_site"] or "").strip()
             target_name = str(target_tag["name"])
-            if current_target and self._category_key(current_target) != self._category_key(target_name):
-                connection.rollback()
-                raise ValueError("target tag does not match claimed mapping")
-            if not current_target:
-                connection.execute(
-                    """
-                    UPDATE access_mappings
-                    SET target_site = ?
-                    WHERE id = ? AND status = 'in_progress' AND claimed_by = ?
-                    """,
-                    (target_name, int(mapping_id), normalized_claimed_by),
-                )
+            connection.execute(
+                """
+                UPDATE access_mappings
+                SET target_site = ?
+                WHERE id = ? AND status = 'in_progress' AND claimed_by = ?
+                """,
+                (target_name, int(mapping_id), normalized_claimed_by),
+            )
             connection.commit()
 
         updated = self.get_by_id(int(mapping_id))

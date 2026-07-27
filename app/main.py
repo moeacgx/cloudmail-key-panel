@@ -701,18 +701,17 @@ def create_app(
             target_tag = _selectable_platform_tag(request.app.state.store, target_tag_id)
             if target_tag is None:
                 return _json_error("请选择有效的平台标签", status.HTTP_400_BAD_REQUEST)
-            if not mapping.target_site.strip():
-                try:
-                    mapping = request.app.state.store.bind_workbench_target_tag(
-                        mapping.id,
-                        claimed_by=_get_workbench_session_id(request),
-                        target_tag_id=target_tag.id,
-                    )
-                except ValueError as exc:
-                    return _json_error(
-                        _translate_store_error(str(exc)),
-                        status.HTTP_409_CONFLICT,
-                    )
+            try:
+                mapping = request.app.state.store.bind_workbench_target_tag(
+                    mapping.id,
+                    claimed_by=_get_workbench_session_id(request),
+                    target_tag_id=target_tag.id,
+                )
+            except ValueError as exc:
+                return _json_error(
+                    _translate_store_error(str(exc)),
+                    status.HTTP_409_CONFLICT,
+                )
             current_target_tag = _platform_tag_for_mapping(request.app.state.store, mapping)
             if current_target_tag is None or current_target_tag.id != target_tag.id:
                 return _json_error("当前邮箱的接码平台不一致", status.HTTP_409_CONFLICT)
@@ -737,18 +736,17 @@ def create_app(
         current_mapping = request.app.state.store.get_by_id(mapping_id)
         latest_email_id = 0
         if current_mapping is not None:
-            if not current_mapping.target_site.strip():
-                try:
-                    current_mapping = request.app.state.store.bind_workbench_target_tag(
-                        current_mapping.id,
-                        claimed_by=_get_workbench_session_id(request),
-                        target_tag_id=target_tag.id,
-                    )
-                except ValueError as exc:
-                    return _json_error(
-                        _translate_store_error(str(exc)),
-                        status.HTTP_409_CONFLICT,
-                    )
+            try:
+                current_mapping = request.app.state.store.bind_workbench_target_tag(
+                    current_mapping.id,
+                    claimed_by=_get_workbench_session_id(request),
+                    target_tag_id=target_tag.id,
+                )
+            except ValueError as exc:
+                return _json_error(
+                    _translate_store_error(str(exc)),
+                    status.HTTP_409_CONFLICT,
+                )
             current_target_tag = _platform_tag_for_mapping(request.app.state.store, current_mapping)
             if current_target_tag is None or current_target_tag.id != target_tag.id:
                 return _json_error("当前邮箱的接码平台不一致", status.HTTP_409_CONFLICT)

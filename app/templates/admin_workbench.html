@@ -286,11 +286,10 @@
           : Array.from(targetTagInput.options).find((option) => option.dataset.tagName === mapping.target_site);
         if (matchingOption) {
           targetTagInput.value = matchingOption.value;
-          targetTagInput.disabled = true;
         } else {
           targetTagInput.value = '';
-          targetTagInput.disabled = false;
         }
+        targetTagInput.disabled = false;
       }
       currentStatus.textContent = mapping.status_label || mapping.status || '';
       currentStatus.className = `badge ${mapping.status === 'in_progress' ? 'badge-warning' : 'badge-success'}`;
@@ -480,7 +479,11 @@
     });
     categoryInput?.addEventListener('change', loadCurrent);
     targetTagInput?.addEventListener('change', () => {
-      if (currentMapping && !currentMapping.target_tag_id) refreshLatestCode();
+      if (currentMapping) {
+        setLatestCode();
+        setMessage('正在切换当前邮箱的接码平台…');
+        refreshLatestCode();
+      }
     });
     privateEmailInput?.addEventListener('change', () => applyPrivatePreference(true));
 

@@ -151,6 +151,38 @@ def test_workbench_page_exposes_confirmed_void_action(tmp_path) -> None:
     assert "window.confirm" in page.text
 
 
+def test_current_mapping_can_switch_between_all_platform_tags(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    source = store.create_tag("未使用", kind="business")
+    openai = store.create_tag("OpenAI", kind="service")
+    grok = store.create_tag("Grok", kind="service")
+    claude = store.create_tag("Claude", kind="service")
+    mapping = store.create_mapping("switch-platform@example.com", category=source.name)
+    client = _admin_client(tmp_path, store, MutableMailboxClient())
+    claimed = _claim(client, category=source.name, target_tag_id=claude.id)
+    assert claimed["id"] == mapping.id
+
+    page = client.get("/admin/workbench")
+    assert page.status_code == 200
+    for tag in (openai, grok, claude):
+        assert f'value="{tag.id}"' in page.text
+    assert "targetTagInput.disabled = true" not in page.text
+
+    switched_to_grok = client.get(
+        "/api/workbench/current/mailbox",
+        params={"target_tag_id": grok.id},
+    )
+    assert switched_to_grok.status_code == 200
+    assert switched_to_grok.json()["mapping"]["target_site"] == "Grok"
+
+    switched_to_openai = client.get(
+        "/api/workbench/current/mailbox",
+        params={"target_tag_id": openai.id},
+    )
+    assert switched_to_openai.status_code == 200
+    assert switched_to_openai.json()["mapping"]["target_site"] == "OpenAI"
+
+
 def test_failed_initial_snapshot_still_restores_mapping_and_allows_skip(tmp_path) -> None:
     store = KeyStore(tmp_path / "app.db")
     source = store.create_tag("未使用", kind="business")
