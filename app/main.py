@@ -215,10 +215,11 @@ def create_app(
         if not _is_admin(request):
             return RedirectResponse(url="/admin/login", status_code=status.HTTP_303_SEE_OTHER)
 
+        all_tag_options = request.app.state.store.list_tag_options()
         tag_options = [
             tag
-            for tag in request.app.state.store.list_tag_options()
-            if tag.kind != "system"
+            for tag in all_tag_options
+            if tag.kind != "system" or tag.name == "未使用"
         ]
 
         return _render(
@@ -328,10 +329,14 @@ def create_app(
                     status.HTTP_409_CONFLICT,
                 )
             try:
-                current = request.app.state.store.bind_workbench_target_tag(
-                    current.id,
-                    claimed_by=claimed_by,
-                    target_tag_id=target_tag.id,
+                current = _bind_workbench_target_tag(
+                    request, current, claimed_by=claimed_by, target_tag_id=target_tag.id
+                )
+            except CloudMailError as exc:
+                return _api_error(
+                    "cloudmail_error",
+                    f"切换平台前建立邮件快照失败：{exc}",
+                    status.HTTP_502_BAD_GATEWAY,
                 )
             except ValueError:
                 return _api_error(
@@ -610,8 +615,9 @@ def create_app(
         if current is not None:
             if not current.target_site.strip():
                 try:
-                    current = request.app.state.store.bind_workbench_target_tag(
-                        current.id,
+                    current = _bind_workbench_target_tag(
+                        request,
+                        current,
                         claimed_by=workbench_session_id,
                         target_tag_id=target_tag.id,
                     )
@@ -702,10 +708,16 @@ def create_app(
             if target_tag is None:
                 return _json_error("请选择有效的平台标签", status.HTTP_400_BAD_REQUEST)
             try:
-                mapping = request.app.state.store.bind_workbench_target_tag(
-                    mapping.id,
+                mapping = _bind_workbench_target_tag(
+                    request,
+                    mapping,
                     claimed_by=_get_workbench_session_id(request),
                     target_tag_id=target_tag.id,
+                )
+            except CloudMailError as exc:
+                return _json_error(
+                    f"切换平台前建立邮件快照失败：{exc}",
+                    status.HTTP_502_BAD_GATEWAY,
                 )
             except ValueError as exc:
                 return _json_error(
@@ -737,10 +749,16 @@ def create_app(
         latest_email_id = 0
         if current_mapping is not None:
             try:
-                current_mapping = request.app.state.store.bind_workbench_target_tag(
-                    current_mapping.id,
+                current_mapping = _bind_workbench_target_tag(
+                    request,
+                    current_mapping,
                     claimed_by=_get_workbench_session_id(request),
                     target_tag_id=target_tag.id,
+                )
+            except CloudMailError as exc:
+                return _json_error(
+                    f"切换平台前建立邮件快照失败：{exc}",
+                    status.HTTP_502_BAD_GATEWAY,
                 )
             except ValueError as exc:
                 return _json_error(
@@ -1428,6 +1446,32 @@ def _ensure_workbench_claim_baseline(request: Request, mapping: AccessMapping) -
     )
 
 
+def _bind_workbench_target_tag(
+    request: Request,
+    mapping: AccessMapping,
+    *,
+    claimed_by: str,
+    target_tag_id: int,
+) -> AccessMapping:
+    """切换平台前读取最新邮件水位，避免旧验证码跨平台串用。"""
+
+    current_tag = _platform_tag_for_mapping(request.app.state.store, mapping)
+    baseline_email_id: int | None = None
+    if current_tag is not None and current_tag.id != int(target_tag_id):
+        cloudmail_settings = _get_cloudmail_settings_for_display(request)
+        emails = _get_cloudmail_client(request).fetch_recent_emails(
+            mapping.query_email,
+            limit=cloudmail_settings.recent_email_limit,
+        )
+        baseline_email_id = max_email_id(emails, baseline=mapping.last_seen_email_id)
+    return request.app.state.store.bind_workbench_target_tag(
+        mapping.id,
+        claimed_by=claimed_by,
+        target_tag_id=target_tag_id,
+        baseline_email_id=baseline_email_id,
+    )
+
+
 def _build_workbench_latest_code_payload(request: Request, mapping: AccessMapping) -> tuple[dict[str, Any], int]:
     cloudmail_settings = _get_cloudmail_settings_for_display(request)
     baseline_was_ready = request.app.state.store.is_workbench_claim_baseline_ready(
@@ -1681,7 +1725,9 @@ def _legacy_category_from_tag_ids(store: KeyStore, tag_ids: list[int]) -> str:
     selected_tags: list[TagOption] = []
     for tag_id in normalized_ids:
         tag = store.get_tag(tag_id)
-        if tag is None or tag.archived or tag.kind == "system":
+        if tag is None or tag.archived or (
+            tag.kind == "system" and tag.name != "未使用"
+        ):
             raise ValueError("tag not found")
         selected_tags.append(tag)
 
@@ -1783,11 +1829,13 @@ def _render_admin_dashboard(
         offset=offset,
         include_aliases=False,
     )
+    all_tags = request.app.state.store.list_tag_options()
     tags = [
         tag
-        for tag in request.app.state.store.list_tag_options()
+        for tag in all_tags
         if tag.kind != "system"
     ]
+    unused_tag = next((tag for tag in all_tags if tag.name == "未使用"), None)
     categories = [tag.name for tag in tags]
     cloudmail_config = _get_cloudmail_settings_for_display(request)
     verification_config = _get_verification_settings(request)
@@ -1845,6 +1893,7 @@ def _render_admin_dashboard(
             "mappings": display_mappings,
             "categories": categories,
             "tags": tags,
+            "unused_tag": unused_tag,
             "cloudmail_config": cloudmail_config,
             "verification_config": verification_config,
             "error": error,
@@ -2040,6 +2089,8 @@ def _translate_store_error(message: str) -> str:
         "claimed_by is required": "工作台会话无效，请刷新后重新登录",
         "claimed_by already has active mapping": "当前调用方已经领取了一个邮箱",
         "mapping not claimed by this session": "这个邮箱不是当前工作台领取的",
+        "mapping already used for target platform": "这个邮箱已经用于该平台，不能重复切换使用",
+        "platform switch baseline is required": "切换平台前必须先建立新的邮件快照",
         "verification code completion tag is required": "验证码已经到达，请先选择成功后追加的标签，不能直接跳过",
         "verification code completion tag is invalid": "验证码已经到达，但成功标签不存在、已停用或不可用于平台记录",
     }
@@ -2048,7 +2099,9 @@ def _translate_store_error(message: str) -> str:
 
 def _selectable_source_tag(store: KeyStore, tag_id: int) -> TagOption | None:
     tag = store.get_tag(tag_id)
-    if tag is None or tag.archived or tag.kind == "system":
+    if tag is None or tag.archived:
+        return None
+    if tag.kind == "system" and tag.name != "未使用":
         return None
     return tag
 

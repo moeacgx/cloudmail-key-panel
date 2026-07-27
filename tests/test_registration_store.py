@@ -84,6 +84,29 @@ def test_restarting_store_does_not_restore_a_manually_removed_legacy_tag(tmp_pat
     assert [tag.name for tag in restarted.list_mapping_tags(mapping.id)] == ["新库存"]
 
 
+def test_unused_system_tag_restores_stock_and_cannot_coexist_with_other_tags(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    mapping = store.create_mapping("restore@example.com")
+    unused = store.create_tag("未使用", kind="business")
+    platform = store.create_tag("OpenAI", kind="service")
+    inventory = store.create_tag("旧库存", kind="business")
+    store.add_mapping_tag(mapping.id, platform.id, source="usage")
+    store.add_mapping_tag(mapping.id, inventory.id, source="manual")
+
+    store.set_mapping_tags(mapping.id, [unused.id])
+
+    restored = store.get_by_id(mapping.id)
+    assert unused.kind == "system"
+    assert restored is not None and restored.category == "未使用"
+    assert [tag.id for tag in store.list_mapping_tags(mapping.id)] == [unused.id]
+
+    store.set_mapping_tags(mapping.id, [unused.id, platform.id])
+
+    mixed = store.get_by_id(mapping.id)
+    assert mixed is not None and mixed.category == "OpenAI"
+    assert [tag.id for tag in store.list_mapping_tags(mapping.id)] == [platform.id]
+
+
 def test_card_expiry_uses_configured_local_timezone(tmp_path) -> None:
     store = KeyStore(tmp_path / "app.db")
     category = store.create_card_category("时区测试")
@@ -487,7 +510,7 @@ def test_mapping_category_defaults_to_business_tag_not_platform(tmp_path) -> Non
 
     assert mapping.category == "未使用"
     assert tag is not None
-    assert tag.kind == "business"
+    assert tag.kind == "system"
 
 
 def test_renaming_platform_tag_keeps_active_workbench_claim_completable(tmp_path) -> None:

@@ -329,9 +329,13 @@ def register_registration_routes(
             }
             for claim in recent_claim_records
         ]
-        tags = [tag for tag in store.list_tag_options() if tag.kind != "system"]
+        all_tags = store.list_tag_options()
+        tags = [tag for tag in all_tags if tag.kind != "system"]
         service_tags = [tag for tag in tags if tag.kind == "service"]
         inventory_tags = [tag for tag in tags if tag.kind == "business"]
+        unused_tag = next((tag for tag in all_tags if tag.name == "未使用"), None)
+        if unused_tag is not None:
+            inventory_tags.insert(0, unused_tag)
         return render(
             request,
             "admin_cards.html",
@@ -407,7 +411,9 @@ def register_registration_routes(
                 raise ValueError("source tag is required")
             normalized_source_tag_id = int(source_tag_id)
             source_tag = store.get_tag(normalized_source_tag_id)
-            if source_tag is None or source_tag.kind != "business" or source_tag.archived:
+            if source_tag is None or (
+                source_tag.kind != "business" and source_tag.name != "未使用"
+            ) or source_tag.archived:
                 raise ValueError("source tag not found")
             resolved_include_tag_ids = list(include_tag_ids)
             if normalized_source_tag_id not in resolved_include_tag_ids:

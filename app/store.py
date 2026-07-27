@@ -39,6 +39,7 @@ VALID_CARD_STATUSES = {"active", "disabled"}
 VALID_CLAIM_STATUSES = {"pending", "completed", "skipped", "timed_out"}
 VALID_VERIFICATION_EVENT_SOURCES = {"public_card", "admin_workbench", "external_api"}
 VALID_GLOBAL_EXTRACTION_MODES = {"off", "fallback", "only"}
+SYSTEM_UNUSED_TAG_NAME = "未使用"
 _ICLOUD_ALIAS_TAG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
 
@@ -463,9 +464,11 @@ class KeyStore:
                 FROM categories
                 LEFT JOIN mapping_tags ON mapping_tags.tag_id = categories.id
                 WHERE categories.kind != 'system'
+                   OR categories.normalized_name = ?
                 GROUP BY categories.id
                 ORDER BY categories.normalized_name ASC, categories.id ASC
-                """
+                """,
+                (self._category_key(SYSTEM_UNUSED_TAG_NAME),),
             ).fetchall()
 
         options = [
@@ -534,6 +537,8 @@ class KeyStore:
         normalized_kind = (kind or "service").strip().lower()
         if normalized_kind not in {"service", "business", "system"}:
             raise ValueError("tag kind is invalid")
+        if self._category_key(canonical_name) == self._category_key(SYSTEM_UNUSED_TAG_NAME):
+            normalized_kind = "system"
         normalized_senders = self._normalize_rule_values(sender_patterns)
         normalized_subjects = self._normalize_rule_values(subject_keywords)
         normalized_alias_use_limit = self._normalize_alias_use_limit(alias_use_limit)
@@ -978,11 +983,26 @@ class KeyStore:
             connection.commit()
 
     def set_mapping_tags(self, mapping_id: int, tag_ids: list[int] | tuple[int, ...]) -> None:
-        """同步人工标签，同时保留由成功接码固化的使用标签。"""
+        """同步人工标签；单独选择“未使用”时将邮箱恢复为纯库存状态。"""
         root_id = self.get_root_mapping_id(mapping_id)
         normalized_ids = self._normalize_tag_ids(tag_ids)
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            restore_unused = False
+            unused_tag = connection.execute(
+                "SELECT id FROM categories WHERE normalized_name = ? AND kind = 'system'",
+                (self._category_key(SYSTEM_UNUSED_TAG_NAME),),
+            ).fetchone()
+            if unused_tag is not None:
+                unused_tag_id = int(unused_tag["id"])
+                if any(tag_id != unused_tag_id for tag_id in normalized_ids):
+                    # “未使用”是单独的库存状态。只要选择了其他标签，就不能
+                    # 再把它作为并行人工标签保存；只提交它本身则表示恢复库存。
+                    normalized_ids = tuple(
+                        tag_id for tag_id in normalized_ids if tag_id != unused_tag_id
+                    )
+                else:
+                    restore_unused = normalized_ids == (unused_tag_id,)
             if normalized_ids:
                 placeholders = ", ".join("?" for _ in normalized_ids)
                 rows = connection.execute(
@@ -1000,7 +1020,7 @@ class KeyStore:
             removable = [
                 tag_id
                 for tag_id, source in existing.items()
-                if source != "usage" and tag_id not in normalized_ids
+                if (restore_unused or source != "usage") and tag_id not in normalized_ids
             ]
             if removable:
                 placeholders = ", ".join("?" for _ in removable)
@@ -2722,8 +2742,9 @@ class KeyStore:
         *,
         claimed_by: str,
         target_tag_id: int,
+        baseline_email_id: int | None = None,
     ) -> AccessMapping:
-        """绑定或切换当前工作台邮箱的平台标签。"""
+        """绑定或切换当前工作台平台；切换时同步新的邮件边界。"""
 
         normalized_claimed_by = claimed_by.strip()
         if not normalized_claimed_by:
@@ -2733,7 +2754,7 @@ class KeyStore:
             connection.execute("BEGIN IMMEDIATE")
             mapping = connection.execute(
                 """
-                SELECT id, target_site
+                SELECT id, parent_mapping_id, target_site
                 FROM access_mappings
                 WHERE id = ? AND status = 'in_progress' AND claimed_by = ?
                 """,
@@ -2756,14 +2777,56 @@ class KeyStore:
                 raise ValueError("tag not found")
 
             target_name = str(target_tag["name"])
+            current_target_name = str(mapping["target_site"] or "")
+            switching_platform = bool(current_target_name) and current_target_name != target_name
+            root_mapping_id = int(mapping["parent_mapping_id"] or mapping["id"])
+            if switching_platform:
+                if baseline_email_id is None:
+                    connection.rollback()
+                    raise ValueError("platform switch baseline is required")
+                existing_usage = connection.execute(
+                    """
+                    SELECT 1
+                    FROM mapping_tags
+                    WHERE mapping_id = ? AND tag_id = ? AND source = 'usage'
+                    LIMIT 1
+                    """,
+                    (root_mapping_id, int(target_tag["id"])),
+                ).fetchone()
+                if existing_usage is not None:
+                    connection.rollback()
+                    raise ValueError("mapping already used for target platform")
+
+            normalized_baseline = max(0, int(baseline_email_id or 0))
             connection.execute(
                 """
                 UPDATE access_mappings
-                SET target_site = ?
+                SET target_site = ?,
+                    last_seen_email_id = CASE
+                        WHEN ? THEN MAX(last_seen_email_id, ?)
+                        ELSE last_seen_email_id
+                    END,
+                    claim_baseline_ready = CASE WHEN ? THEN 1 ELSE claim_baseline_ready END
                 WHERE id = ? AND status = 'in_progress' AND claimed_by = ?
                 """,
-                (target_name, int(mapping_id), normalized_claimed_by),
+                (
+                    target_name,
+                    switching_platform,
+                    normalized_baseline,
+                    switching_platform,
+                    int(mapping_id),
+                    normalized_claimed_by,
+                ),
             )
+            if switching_platform and root_mapping_id != int(mapping_id):
+                connection.execute(
+                    """
+                    UPDATE access_mappings
+                    SET last_seen_email_id = MAX(last_seen_email_id, ?)
+                    WHERE id = ?
+                    """,
+                    (normalized_baseline, root_mapping_id),
+                )
             connection.commit()
 
         updated = self.get_by_id(int(mapping_id))
@@ -4127,6 +4190,14 @@ class KeyStore:
                 """
             )
             self._sync_categories(connection)
+            connection.execute(
+                """
+                UPDATE categories
+                SET kind = 'system', archived = 0, prevents_reuse = 0
+                WHERE normalized_name = ?
+                """,
+                (self._category_key(SYSTEM_UNUSED_TAG_NAME),),
+            )
             self._initialize_registration_tables(connection)
             self._backfill_mapping_tags(connection)
             connection.commit()
@@ -4499,8 +4570,21 @@ class KeyStore:
                 INSERT OR IGNORE INTO categories (name, normalized_name, kind, created_at)
                 VALUES (?, ?, 'business', ?)
                 """,
-                (normalized, category_key, self._now()),
+                (
+                    normalized,
+                    category_key,
+                    self._now(),
+                ),
             )
+            if category_key == self._category_key(SYSTEM_UNUSED_TAG_NAME):
+                connection.execute(
+                    """
+                    UPDATE categories
+                    SET kind = 'system', archived = 0, prevents_reuse = 0
+                    WHERE normalized_name = ?
+                    """,
+                    (category_key,),
+                )
             row = connection.execute(
                 "SELECT name FROM categories WHERE normalized_name = ?",
                 (category_key,),

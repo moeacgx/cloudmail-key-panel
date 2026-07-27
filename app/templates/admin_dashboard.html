@@ -207,10 +207,16 @@
       <span class="text-sm font-medium">备注（可选）</span>
       <input class="input input-bordered w-full" type="text" name="label" placeholder="例如订单号 / 商品名">
     </label>
-    {% if tags | default([]) %}
+    {% if tags | default([]) or unused_tag %}
       <fieldset class="grid gap-2">
         <legend class="text-sm font-medium">邮箱标签（可多选）</legend>
         <div class="flex flex-wrap gap-1.5 rounded-box border border-base-300 px-2 py-2">
+          {% if unused_tag %}
+            <label class="flex cursor-pointer items-center gap-1.5 rounded-field bg-warning/10 px-2 py-1 text-sm hover:bg-warning/20">
+              <input class="checkbox checkbox-xs" type="checkbox" name="tag_ids" value="{{ unused_tag.id }}" data-unused-tag-choice>
+              <span>未使用（系统库存状态）</span>
+            </label>
+          {% endif %}
           {% for tag in tags %}
             <label class="flex cursor-pointer items-center gap-1.5 rounded-field bg-base-200/70 px-2 py-1 text-sm hover:bg-base-200">
               <input class="checkbox checkbox-xs" type="checkbox" name="tag_ids" value="{{ tag.id }}">
@@ -218,7 +224,7 @@
             </label>
           {% endfor %}
         </div>
-        <span class="text-xs text-base-content/45">可同时选择多个标签；成功接码产生的平台标签会自动保留。</span>
+        <span class="text-xs text-base-content/45">“未使用”是独立库存状态；选择它会清空其他标签，选择其他标签时会自动取消它。</span>
       </fieldset>
     {% else %}
       <p class="text-sm text-base-content/55">暂无可用标签，请先到“邮箱标签”中创建。</p>
@@ -401,10 +407,16 @@
             <span class="text-sm font-medium">备注</span>
             <input id="edit-label" class="input input-bordered w-full" type="text" name="label" placeholder="例如订单号 / 商品名">
           </label>
-          {% if tags | default([]) %}
+          {% if tags | default([]) or unused_tag %}
             <fieldset class="grid gap-2 sm:col-span-2">
               <legend class="text-sm font-medium">邮箱标签（可多选）</legend>
               <div class="flex flex-wrap gap-1.5 rounded-box border border-base-300 px-2 py-2">
+                {% if unused_tag %}
+                  <label class="flex cursor-pointer items-center gap-1.5 rounded-field bg-warning/10 px-2 py-1 text-sm hover:bg-warning/20">
+                    <input class="checkbox checkbox-xs" type="checkbox" name="tag_ids" value="{{ unused_tag.id }}" data-edit-tag-choice data-unused-tag-choice>
+                    <span>未使用（系统库存状态）</span>
+                  </label>
+                {% endif %}
                 {% for tag in tags %}
                   <label class="flex cursor-pointer items-center gap-1.5 rounded-field bg-base-200/70 px-2 py-1 text-sm hover:bg-base-200">
                     <input class="checkbox checkbox-xs" type="checkbox" name="tag_ids" value="{{ tag.id }}" data-edit-tag-choice>
@@ -412,7 +424,7 @@
                   </label>
                 {% endfor %}
               </div>
-              <span class="text-xs text-base-content/45">成功接码产生的平台标签会自动保留，不能通过编辑邮箱移除。</span>
+              <span class="text-xs text-base-content/45">“未使用”只能单独保存；选择它会清空其他标签，选择其他标签时会自动移除它。</span>
             </fieldset>
           {% endif %}
         </div>
@@ -538,6 +550,7 @@
       const keyInput = document.getElementById('edit-access-key');
       const labelInput = document.getElementById('edit-label');
       const tagChoices = Array.from(mappingForm.querySelectorAll('[data-edit-tag-choice]'));
+      const unusedTagChoice = mappingForm.querySelector('[data-unused-tag-choice]');
 
       document.querySelectorAll('[data-edit-key-trigger]').forEach((button) => {
         button.addEventListener('click', () => {
@@ -552,6 +565,18 @@
         });
       });
     }
+
+    document.querySelectorAll('[data-unused-tag-choice]').forEach((unusedChoice) => {
+      const form = unusedChoice.closest('form');
+      if (!form) return;
+      const otherChoices = Array.from(form.querySelectorAll('[name="tag_ids"]:not([data-unused-tag-choice])'));
+      unusedChoice.addEventListener('change', () => {
+        if (unusedChoice.checked) otherChoices.forEach((choice) => { choice.checked = false; });
+      });
+      otherChoices.forEach((choice) => choice.addEventListener('change', () => {
+        if (choice.checked) unusedChoice.checked = false;
+      }));
+    });
 
     document.querySelectorAll('[data-copy-link-url]').forEach((button) => {
       button.addEventListener('click', async () => {

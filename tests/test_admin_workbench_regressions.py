@@ -154,11 +154,12 @@ def test_workbench_page_exposes_confirmed_void_action(tmp_path) -> None:
 def test_current_mapping_can_switch_between_all_platform_tags(tmp_path) -> None:
     store = KeyStore(tmp_path / "app.db")
     source = store.create_tag("未使用", kind="business")
-    openai = store.create_tag("OpenAI", kind="service")
-    grok = store.create_tag("Grok", kind="service")
-    claude = store.create_tag("Claude", kind="service")
+    openai = store.create_tag("OpenAI", kind="service", sender_patterns="@openai.com")
+    grok = store.create_tag("Grok", kind="service", sender_patterns="@openai.com")
+    claude = store.create_tag("Claude", kind="service", sender_patterns="@openai.com")
     mapping = store.create_mapping("switch-platform@example.com", category=source.name)
-    client = _admin_client(tmp_path, store, MutableMailboxClient())
+    cloudmail = MutableMailboxClient()
+    client = _admin_client(tmp_path, store, cloudmail)
     claimed = _claim(client, category=source.name, target_tag_id=claude.id)
     assert claimed["id"] == mapping.id
 
@@ -168,12 +169,28 @@ def test_current_mapping_can_switch_between_all_platform_tags(tmp_path) -> None:
         assert f'value="{tag.id}"' in page.text
     assert "targetTagInput.disabled = true" not in page.text
 
+    cloudmail.set_code(mapping.recipient_email, "123456", email_id=10)
+    old_platform_mailbox = client.get(
+        "/api/workbench/current/mailbox",
+        params={"target_tag_id": claude.id},
+    )
+    assert old_platform_mailbox.json()["latest_code"] == "123456"
+
     switched_to_grok = client.get(
         "/api/workbench/current/mailbox",
         params={"target_tag_id": grok.id},
     )
     assert switched_to_grok.status_code == 200
     assert switched_to_grok.json()["mapping"]["target_site"] == "Grok"
+    assert switched_to_grok.json()["latest_code"] is None
+    assert store.get_by_id(mapping.id).last_seen_email_id == 10
+
+    cloudmail.set_code(mapping.recipient_email, "234567", email_id=11)
+    new_platform_mailbox = client.get(
+        "/api/workbench/current/mailbox",
+        params={"target_tag_id": grok.id},
+    )
+    assert new_platform_mailbox.json()["latest_code"] == "234567"
 
     switched_to_openai = client.get(
         "/api/workbench/current/mailbox",
@@ -181,6 +198,27 @@ def test_current_mapping_can_switch_between_all_platform_tags(tmp_path) -> None:
     )
     assert switched_to_openai.status_code == 200
     assert switched_to_openai.json()["mapping"]["target_site"] == "OpenAI"
+
+
+def test_current_mapping_cannot_switch_to_an_already_used_platform(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    source = store.create_tag("未使用", kind="business")
+    openai = store.create_tag("OpenAI", kind="service")
+    claude = store.create_tag("Claude", kind="service")
+    mapping = store.create_mapping("used-platform@example.com", category=source.name)
+    store.add_mapping_tag(mapping.id, openai.id, source="usage")
+    client = _admin_client(tmp_path, store, MutableMailboxClient())
+    claimed = _claim(client, category=source.name, target_tag_id=claude.id)
+    assert claimed["id"] == mapping.id
+
+    rejected = client.get(
+        "/api/workbench/current/mailbox",
+        params={"target_tag_id": openai.id},
+    )
+
+    assert rejected.status_code == 409
+    assert "已经用于该平台" in rejected.json()["message"]
+    assert store.get_by_id(mapping.id).target_site == "Claude"
 
 
 def test_failed_initial_snapshot_still_restores_mapping_and_allows_skip(tmp_path) -> None:
@@ -241,7 +279,7 @@ def test_dashboard_can_save_manual_tags_and_release_occupied_mapping_on_mailbox_
     assert "工作台占用已自动解除" in saved.text
     refreshed = store.get_by_id(mapping.id)
     assert refreshed is not None and refreshed.status == "idle"
-    assert {tag.id for tag in store.list_mapping_tags(mapping.id)} == {source.id, platform.id}
+    assert {tag.id for tag in store.list_mapping_tags(mapping.id)} == {platform.id}
 
 
 def test_claim_next_refuses_to_replace_an_unfinished_mapping(tmp_path) -> None:
