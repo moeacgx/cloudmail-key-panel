@@ -1897,9 +1897,9 @@ def test_external_api_claims_by_category_returns_full_mail_and_isolates_clients(
     completed_payload = completed.json()
     assert completed.status_code == 200
     assert completed_payload["completed"]["id"] == first.id
-    assert completed_payload["completed"]["category_id"] == source_category_id
+    assert completed_payload["completed"]["category_id"] == platform_tag.id
     assert completed_payload["mapping"]["id"] == third.id
-    assert store.get_by_id(first.id).category == "未使用"
+    assert store.get_by_id(first.id).category == platform_tag.name
     assert store.count_verification_events(tag_id=platform_tag.id) == 1
     assert client.get("/api/v1/workbench/current", auth=auth, headers=worker_b).json()["mapping"]["id"] == second.id
 

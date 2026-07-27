@@ -52,8 +52,8 @@ def _client(tmp_path, store: KeyStore, cloudmail: AdminMailboxClient) -> TestCli
 
 def test_admin_alias_mode_records_usage_on_root_and_can_repeat_same_service(tmp_path) -> None:
     store = KeyStore(tmp_path / "app.db")
-    store.create_tag("未使用", kind="business")
-    root = store.create_mapping("admin-alias@icloud.com", category="未使用")
+    store.create_tag("可复用", kind="business")
+    root = store.create_mapping("admin-alias@icloud.com", category="可复用")
     gpt = store.create_tag("GPT", kind="service")
     cloudmail = AdminMailboxClient()
     client = _client(tmp_path, store, cloudmail)
@@ -61,7 +61,7 @@ def test_admin_alias_mode_records_usage_on_root_and_can_repeat_same_service(tmp_
     claimed_response = client.post(
         "/api/workbench/claim-next",
         data={
-            "category": "未使用",
+            "category": "可复用",
             "target_tag_id": str(gpt.id),
             "address_mode": "icloud_alias",
         },
@@ -81,7 +81,7 @@ def test_admin_alias_mode_records_usage_on_root_and_can_repeat_same_service(tmp_
         "/api/workbench/current/mark-used",
         data={
             "mapping_id": claimed["id"],
-            "category": "未使用",
+            "category": "可复用",
             "target_tag_id": str(gpt.id),
             "address_mode": "icloud_alias",
         },
@@ -98,7 +98,7 @@ def test_admin_alias_mode_records_usage_on_root_and_can_repeat_same_service(tmp_
     next_response = client.post(
         "/api/workbench/claim-next",
         data={
-            "category": "未使用",
+            "category": "可复用",
             "target_tag_id": str(gpt.id),
             "address_mode": "icloud_alias",
         },
@@ -113,7 +113,7 @@ def test_admin_alias_mode_records_usage_on_root_and_can_repeat_same_service(tmp_
         "/api/workbench/current/skip",
         data={
             "mapping_id": second_alias_id,
-            "category": "未使用",
+            "category": "可复用",
             "target_tag_id": str(gpt.id),
         },
     )
@@ -124,7 +124,7 @@ def test_admin_alias_mode_records_usage_on_root_and_can_repeat_same_service(tmp_
     fixed_same_service = client.post(
         "/api/workbench/claim-next",
         data={
-            "category": "未使用",
+            "category": "可复用",
             "target_tag_id": str(gpt.id),
             "address_mode": "primary",
         },

@@ -406,9 +406,9 @@ def test_external_api_complete_and_skip_follow_workbench_category_flow(tmp_path)
 
     assert response.status_code == 200
     assert payload["completed"]["id"] == first.id
-    assert payload["completed"]["category"] == source_tag.name
+    assert payload["completed"]["category"] == target_tag.name
     assert payload["mapping"]["id"] == second.id
-    assert store.get_by_id(first.id).category == source_tag.name
+    assert store.get_by_id(first.id).category == target_tag.name
     assert store.get_by_id(first.id).status == "idle"
     assert store.get_by_id(first.id).target_site == target_tag.name
     assert store.get_by_id(second.id).claimed_by == "api:complete-worker"
@@ -549,18 +549,18 @@ def test_external_api_hides_uninitialized_claim_when_cloudmail_query_fails(tmp_p
 
 def test_external_api_supports_unique_icloud_aliases_and_additive_tags(tmp_path) -> None:
     store = KeyStore(tmp_path / "app.db")
-    store.create_tag("未使用", kind="business")
+    store.create_tag("可复用", kind="business")
     root = store.create_mapping(
         "api-alias@icloud.com",
         query_email="openai@eve.ink",
-        category="未使用",
+        category="可复用",
     )
     gpt = store.create_tag("GPT", kind="service")
     fake_cloudmail = FakeCloudMailClient()
     client = TestClient(
         create_app(settings=_settings(tmp_path), store=store, cloudmail_client=fake_cloudmail)
     )
-    source_id = store.get_category_id("未使用")
+    source_id = store.get_category_id("可复用")
     headers = _headers("alias-worker")
 
     claimed_response = client.post(
@@ -618,7 +618,7 @@ def test_external_api_supports_unique_icloud_aliases_and_additive_tags(tmp_path)
     assert completed.status_code == 200
     assert payload["mapping"]["address_mode"] == "icloud_alias"
     assert payload["mapping"]["registration_email"] != first_alias
-    assert {tag.name for tag in store.list_mapping_tags(root.id)} == {"未使用", "GPT"}
+    assert {tag.name for tag in store.list_mapping_tags(root.id)} == {"可复用", "GPT"}
     assert store.count_verification_events(tag_id=gpt.id) == 1
 
 

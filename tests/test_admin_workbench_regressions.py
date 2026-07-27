@@ -67,6 +67,9 @@ def test_skip_button_does_not_require_a_platform_selection(tmp_path) -> None:
 
     assert page.status_code == 200
     assert "if (isCompletion && !targetTagInput?.value)" in page.text
+    assert "已有备注 / 标签" in page.text
+    assert "data-current-platform" in page.text
+    assert "本次平台：${mapping.target_site}" in page.text
 
 
 def test_skip_releases_current_even_when_mailbox_query_is_broken(tmp_path) -> None:
@@ -96,7 +99,7 @@ def test_skip_releases_current_even_when_mailbox_query_is_broken(tmp_path) -> No
 
 def test_void_current_retires_mailbox_and_replaces_source_tag(tmp_path) -> None:
     store = KeyStore(tmp_path / "app.db")
-    source = store.create_tag("未使用", kind="business")
+    source = store.create_tag("待注册", kind="business")
     platform = store.create_tag("OpenAI", kind="service")
     history = store.create_tag("Claude", kind="service")
     mapping = store.create_mapping("dead-mailbox@example.com", category=source.name)
@@ -120,7 +123,7 @@ def test_void_current_retires_mailbox_and_replaces_source_tag(tmp_path) -> None:
     assert refreshed.reuse_policy == "retired"
     assert refreshed.target_site == ""
     tags = {tag.name: tag for tag in store.list_mapping_tags(mapping.id)}
-    assert "未使用" not in tags
+    assert "待注册" not in tags
     assert "OpenAI" not in tags
     assert tags["邮箱作废"].prevents_reuse is True
     assert tags["Claude"].kind == "service"
@@ -202,7 +205,7 @@ def test_current_mapping_can_switch_between_all_platform_tags(tmp_path) -> None:
 
 def test_current_mapping_cannot_switch_to_an_already_used_platform(tmp_path) -> None:
     store = KeyStore(tmp_path / "app.db")
-    source = store.create_tag("未使用", kind="business")
+    source = store.create_tag("待注册", kind="business")
     openai = store.create_tag("OpenAI", kind="service")
     claude = store.create_tag("Claude", kind="service")
     mapping = store.create_mapping("used-platform@example.com", category=source.name)
@@ -219,6 +222,35 @@ def test_current_mapping_cannot_switch_to_an_already_used_platform(tmp_path) -> 
     assert rejected.status_code == 409
     assert "已经用于该平台" in rejected.json()["message"]
     assert store.get_by_id(mapping.id).target_site == "Claude"
+
+
+def test_icloud_alias_must_be_reclaimed_to_change_platform(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    source = store.create_tag("未使用", kind="business")
+    openai = store.create_tag("OpenAI", kind="service")
+    grok = store.create_tag("Grok", kind="service")
+    store.create_mapping("alias-switch@icloud.com", category=source.name)
+    client = _admin_client(tmp_path, store, MutableMailboxClient())
+    claimed = client.post(
+        "/api/workbench/claim-next",
+        data={
+            "category": source.name,
+            "target_tag_id": str(openai.id),
+            "address_mode": "icloud_alias",
+        },
+    )
+    assert claimed.status_code == 200
+    alias_mapping = claimed.json()["mapping"]
+    assert alias_mapping["address_kind"] == "icloud_alias"
+
+    rejected = client.get(
+        "/api/workbench/current/mailbox",
+        params={"target_tag_id": grok.id},
+    )
+
+    assert rejected.status_code == 409
+    assert "裂变邮箱领取后不能切换平台" in rejected.json()["message"]
+    assert store.get_by_id(alias_mapping["id"]).target_site == "OpenAI"
 
 
 def test_failed_initial_snapshot_still_restores_mapping_and_allows_skip(tmp_path) -> None:

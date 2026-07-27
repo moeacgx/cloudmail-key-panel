@@ -129,7 +129,7 @@ def test_card_expiry_uses_configured_local_timezone(tmp_path) -> None:
 
 def test_primary_address_is_tagged_and_charged_only_after_success(tmp_path) -> None:
     store = KeyStore(tmp_path / "app.db")
-    first = store.create_mapping("first@icloud.com")
+    first = store.create_mapping("first@icloud.com", category="未使用")
     second = store.create_mapping("second@icloud.com")
     gpt = store.create_tag("GPT")
     _batch, card = _create_batch(store, tag_id=gpt.id, uses=2)
@@ -137,7 +137,7 @@ def test_primary_address_is_tagged_and_charged_only_after_success(tmp_path) -> N
     pending = store.start_registration_claim(card.code, address_mode="primary")
     assert pending.mapping_id == first.id
     assert store.get_card_by_code(card.code).remaining_uses == 2
-    assert store.list_mapping_tags(first.id) == []
+    assert [tag.name for tag in store.list_mapping_tags(first.id)] == ["未使用"]
 
     completed = store.complete_registration_claim(
         pending.id,
@@ -156,6 +156,7 @@ def test_primary_address_is_tagged_and_charged_only_after_success(tmp_path) -> N
     assert completed_again.status == "completed"
     assert store.get_card_by_code(card.code).remaining_uses == 1
     assert [tag.name for tag in store.list_mapping_tags(first.id)] == ["GPT"]
+    assert store.get_by_id(first.id).category == "GPT"
     saved_tag = store.get_tag(gpt.id)
     assert saved_tag is not None
     assert saved_tag.count == 1
@@ -511,6 +512,52 @@ def test_mapping_category_defaults_to_business_tag_not_platform(tmp_path) -> Non
     assert mapping.category == "未使用"
     assert tag is not None
     assert tag.kind == "system"
+
+
+def test_workbench_success_removes_unused_inventory_status(tmp_path) -> None:
+    store = KeyStore(tmp_path / "app.db")
+    mapping = store.create_mapping("unused-success@example.com", category="未使用")
+    platform = store.create_tag("OpenAI", kind="service")
+    claimed = store.claim_next_available_mapping(
+        category_filter="未使用",
+        target_site=platform.name,
+        claimed_by="admin:unused-success",
+        exclude_tag_id=platform.id,
+    )
+    assert claimed is not None and claimed.id == mapping.id
+
+    completed = store.complete_workbench_mapping(
+        mapping.id,
+        target_tag_id=platform.id,
+        claimed_by="admin:unused-success",
+        verification_source="admin_workbench",
+        email_id=1501,
+    )
+
+    assert completed.category == "OpenAI"
+    assert [tag.name for tag in store.list_mapping_tags(mapping.id)] == ["OpenAI"]
+
+
+def test_store_startup_cleans_legacy_unused_tag_conflicts(tmp_path) -> None:
+    database = tmp_path / "app.db"
+    store = KeyStore(database)
+    mapping = store.create_mapping("legacy-conflict@example.com", category="未使用")
+    platform = store.create_tag("OpenAI", kind="service")
+    with store._connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO mapping_tags (mapping_id, tag_id, source, created_at)
+            VALUES (?, ?, 'usage', ?)
+            """,
+            (mapping.id, platform.id, store._now()),
+        )
+        connection.commit()
+
+    migrated = KeyStore(database)
+
+    refreshed = migrated.get_by_id(mapping.id)
+    assert refreshed is not None and refreshed.category == "OpenAI"
+    assert [tag.name for tag in migrated.list_mapping_tags(mapping.id)] == ["OpenAI"]
 
 
 def test_renaming_platform_tag_keeps_active_workbench_claim_completable(tmp_path) -> None:

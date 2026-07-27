@@ -2090,6 +2090,7 @@ def _translate_store_error(message: str) -> str:
         "claimed_by already has active mapping": "当前调用方已经领取了一个邮箱",
         "mapping not claimed by this session": "这个邮箱不是当前工作台领取的",
         "mapping already used for target platform": "这个邮箱已经用于该平台，不能重复切换使用",
+        "alias platform switch is not allowed": "iCloud 裂变邮箱领取后不能切换平台，请先跳过再按新平台领取",
         "platform switch baseline is required": "切换平台前必须先建立新的邮件快照",
         "verification code completion tag is required": "验证码已经到达，请先选择成功后追加的标签，不能直接跳过",
         "verification code completion tag is invalid": "验证码已经到达，但成功标签不存在、已停用或不可用于平台记录",

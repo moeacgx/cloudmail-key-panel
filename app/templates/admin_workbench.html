@@ -89,8 +89,9 @@
       <button type="button" class="inline-flex h-8 w-fit items-center justify-center rounded-field border border-error/40 bg-white px-3 font-mono text-sm font-bold tracking-wider text-error shadow-sm transition-colors hover:border-error hover:bg-white hover:text-error focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-error disabled:cursor-default disabled:opacity-60" data-current-code disabled>等待验证码…</button>
     </div>
     <div class="grid min-w-0 gap-1" data-current-meta-wrap>
-      <span class="text-xs font-medium text-base-content/50">备注 / 标签</span>
+      <span class="text-xs font-medium text-base-content/50">已有备注 / 标签</span>
       <span class="block min-w-0 max-w-full truncate" data-current-meta></span>
+      <span class="text-xs text-base-content/50" data-current-platform></span>
     </div>
   </div>
 
@@ -127,6 +128,7 @@
     const currentQueryEmail = document.querySelector('[data-current-query-email]');
     const currentCode = document.querySelector('[data-current-code]');
     const currentMeta = document.querySelector('[data-current-meta]');
+    const currentPlatform = document.querySelector('[data-current-platform]');
     const openMailbox = document.querySelector('[data-open-mailbox]');
     const claimNextButton = document.querySelector('[data-claim-next]');
     const refreshMailboxButton = document.querySelector('[data-refresh-mailbox]');
@@ -299,13 +301,13 @@
       const mappingTags = Array.isArray(mapping.tags)
         ? mapping.tags.map((tag) => typeof tag === 'string' ? tag : tag.name).filter(Boolean)
         : [];
-      const fullMeta = [mapping.label, ...(mappingTags.length ? mappingTags : [mapping.category]), mapping.target_site].filter(Boolean).join(' / ');
+      const fullMeta = [mapping.label, ...(mappingTags.length ? mappingTags : [mapping.category])].filter(Boolean).join(' / ');
       currentMeta.textContent = [
         truncateMetaPart(mapping.label),
         ...(mappingTags.length ? mappingTags : [mapping.category]),
-        truncateMetaPart(mapping.target_site),
       ].filter(Boolean).join(' / ') || '未设置';
       currentMeta.title = fullMeta;
+      currentPlatform.textContent = mapping.target_site ? `本次平台：${mapping.target_site}` : '本次平台：未选择';
       openMailbox.href = mapping.mailbox_url || '#';
       setLatestCode();
       if (restartPolling) startPolling();

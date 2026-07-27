@@ -949,6 +949,7 @@ class KeyStore:
                 """,
                 (root_id, int(tag_id), normalized_source, self._now()),
             )
+            self._enforce_unused_tag_exclusivity(connection, root_id)
             connection.commit()
 
     def remove_mapping_tag(self, mapping_id: int, tag_id: int) -> None:
@@ -1071,6 +1072,49 @@ class KeyStore:
         connection.execute(
             "UPDATE access_mappings SET category = ? WHERE id = ?",
             (legacy_category, int(mapping_id)),
+        )
+
+    def _enforce_unused_tag_exclusivity(
+        self,
+        connection: sqlite3.Connection,
+        mapping_id: int,
+        *,
+        remove_unused: bool = False,
+    ) -> None:
+        """保证系统“未使用”不会与其他标签并存。"""
+
+        unused_row = connection.execute(
+            "SELECT id FROM categories WHERE normalized_name = ?",
+            (self._category_key(SYSTEM_UNUSED_TAG_NAME),),
+        ).fetchone()
+        if unused_row is None:
+            return
+        unused_tag_id = int(unused_row["id"])
+        if not remove_unused:
+            has_other_tag = connection.execute(
+                """
+                SELECT 1 FROM mapping_tags
+                WHERE mapping_id = ? AND tag_id != ?
+                LIMIT 1
+                """,
+                (int(mapping_id), unused_tag_id),
+            ).fetchone()
+            if has_other_tag is None:
+                return
+        deleted = connection.execute(
+            "DELETE FROM mapping_tags WHERE mapping_id = ? AND tag_id = ?",
+            (int(mapping_id), unused_tag_id),
+        )
+        if deleted.rowcount == 0:
+            return
+        remaining_rows = connection.execute(
+            "SELECT tag_id FROM mapping_tags WHERE mapping_id = ? ORDER BY tag_id ASC",
+            (int(mapping_id),),
+        ).fetchall()
+        self._sync_legacy_mapping_category(
+            connection,
+            int(mapping_id),
+            [int(row["tag_id"]) for row in remaining_rows],
         )
 
     def list_verification_events(
@@ -2243,6 +2287,11 @@ class KeyStore:
                 address_mode=str(claim["address_mode"]),
                 occurred_at=now,
             )
+            self._enforce_unused_tag_exclusivity(
+                connection,
+                root_mapping_id,
+                remove_unused=True,
+            )
             connection.commit()
 
         completed = self.get_registration_claim(int(claim_id))
@@ -2754,7 +2803,7 @@ class KeyStore:
             connection.execute("BEGIN IMMEDIATE")
             mapping = connection.execute(
                 """
-                SELECT id, parent_mapping_id, target_site
+                SELECT id, parent_mapping_id, target_site, address_kind
                 FROM access_mappings
                 WHERE id = ? AND status = 'in_progress' AND claimed_by = ?
                 """,
@@ -2781,6 +2830,9 @@ class KeyStore:
             switching_platform = bool(current_target_name) and current_target_name != target_name
             root_mapping_id = int(mapping["parent_mapping_id"] or mapping["id"])
             if switching_platform:
+                if str(mapping["address_kind"] or "primary") == "icloud_alias":
+                    connection.rollback()
+                    raise ValueError("alias platform switch is not allowed")
                 if baseline_email_id is None:
                     connection.rollback()
                     raise ValueError("platform switch baseline is required")
@@ -2976,6 +3028,7 @@ class KeyStore:
                     first_used_at = CASE WHEN first_used_at = '' THEN ? ELSE first_used_at END,
                     last_seen_email_id = MAX(last_seen_email_id, ?),
                     claim_baseline_ready = 1,
+                    claim_source_tag_id = 0,
                     target_site = ?
                 WHERE id = ? AND status = 'in_progress' AND claimed_by = ?
                 """,
@@ -3000,6 +3053,7 @@ class KeyStore:
                         first_used_at = CASE WHEN first_used_at = '' THEN ? ELSE first_used_at END,
                         last_seen_email_id = MAX(last_seen_email_id, ?),
                         reuse_policy = CASE WHEN ? IS NULL THEN reuse_policy ELSE ? END,
+                        claim_source_tag_id = 0,
                         target_site = ?
                     WHERE id = ?
                     """,
@@ -3036,6 +3090,21 @@ class KeyStore:
                         f"{str(mapping_row['claimed_at'])}"
                     ),
                 )
+                self._enforce_unused_tag_exclusivity(
+                    connection,
+                    root_mapping_id,
+                    remove_unused=True,
+                )
+                if int(mapping_row["id"]) != root_mapping_id:
+                    root_category = connection.execute(
+                        "SELECT category FROM access_mappings WHERE id = ?",
+                        (root_mapping_id,),
+                    ).fetchone()
+                    if root_category is not None:
+                        connection.execute(
+                            "UPDATE access_mappings SET category = ? WHERE id = ?",
+                            (str(root_category["category"] or ""), int(mapping_row["id"])),
+                        )
             connection.commit()
 
         if cursor.rowcount == 0:
@@ -3178,6 +3247,11 @@ class KeyStore:
             connection.execute(
                 "UPDATE access_mappings SET category = ? WHERE id = ?",
                 (str(void_tag["name"]), root_mapping_id),
+            )
+            self._enforce_unused_tag_exclusivity(
+                connection,
+                root_mapping_id,
+                remove_unused=True,
             )
             connection.commit()
 
@@ -4200,6 +4274,25 @@ class KeyStore:
             )
             self._initialize_registration_tables(connection)
             self._backfill_mapping_tags(connection)
+            conflicting_unused_rows = connection.execute(
+                """
+                SELECT DISTINCT unused_link.mapping_id
+                FROM mapping_tags unused_link
+                JOIN categories unused_tag ON unused_tag.id = unused_link.tag_id
+                WHERE unused_tag.normalized_name = ?
+                  AND EXISTS (
+                      SELECT 1 FROM mapping_tags other_link
+                      WHERE other_link.mapping_id = unused_link.mapping_id
+                        AND other_link.tag_id != unused_link.tag_id
+                  )
+                """,
+                (self._category_key(SYSTEM_UNUSED_TAG_NAME),),
+            ).fetchall()
+            for row in conflicting_unused_rows:
+                self._enforce_unused_tag_exclusivity(
+                    connection,
+                    int(row["mapping_id"]),
+                )
             connection.commit()
 
     def _initialize_registration_tables(self, connection: sqlite3.Connection) -> None:
